@@ -1,32 +1,22 @@
 package main
 
 import "core:fmt"
-import "core:unicode"
-
-is_identifier_char :: proc(c: rune) -> bool {
-    return unicode.is_alpha(c) || c == '_'
-}
+import "lexer"
 
 main :: proc() {
-    source := `
-schema: "my-custom-schema"
+    source := `schema: "my-custom-schema"
 test: 10
 test2: 3.14
+    test3: test
     `
-    tokens := lex_yaml(source)
-    defer delete(tokens)
 
-    for token in tokens {
-        fmt.printf("TokenKind: %-15v | Value: %q\n", token.kind, token.value)
-    }
+    my_lexer := lexer.lexer_init(source);
 
-    doc, err := parse_yaml(tokens);
-    if err != nil {
-        fmt.printf("Error: %v\n", err)
-        return
-    }
-
-    for entry in doc.entries {
-        fmt.printf("Key: %q | Value: %q | Type: %v\n", entry.key, entry.value, entry.type)
+    for {
+        tok := lexer.lexer_next_token(&my_lexer)
+        if tok.kind == .Eof {
+            break
+        }
+        fmt.println(tok)
     }
 }
