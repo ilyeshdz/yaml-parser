@@ -19,6 +19,6 @@ Token_Kind :: enum {
 	Newline,
 	Identifier,
 	String,
-	Number,
-	Integer
+	Integer,
+	Float
 }

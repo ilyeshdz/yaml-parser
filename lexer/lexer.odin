@@ -95,7 +95,20 @@ lexer_next_token :: proc(l: ^Lexer) -> Token {
 		}
 		tok.text = l.input[start_position:l.position]
 		lexer_read_char(l)
+	case '0'..= '9':
+		start := l.position
+		is_float := false
+		for l.ch != ' ' && l.ch != ':' && l.ch != '\n' && l.ch != '\r' {
+			if l.ch == '.' && !is_float {
+				is_float = true
+			}
+			lexer_read_char(l)
+		}
+		tok.kind = .Float if is_float else .Integer
+		tok.text = l.input[start:l.position]
 	case:
+		// handle both identifiers and numbers
+
 		start := l.position
 		tok.kind = .Identifier
 		for l.ch != ' ' && l.ch != ':' && l.ch != '\n' && l.ch != '\r' {
