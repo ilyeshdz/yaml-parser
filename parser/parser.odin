@@ -13,11 +13,12 @@ Parser_State :: enum {
 }
 
 Parser :: struct {
-	lexer:       ^lexer_package.Lexer,
-	current:     lexer_package.Token,
-	previous:    lexer_package.Token,
-	state:       Parser_State,
-	current_key: string,
+	lexer:        ^lexer_package.Lexer,
+	current:      lexer_package.Token,
+	previous:     lexer_package.Token,
+	state:        Parser_State,
+	current_key:  string,
+	indent_stack: [dynamic]int,
 }
 
 parser_init :: proc(lexer: ^lexer_package.Lexer) -> Parser {
@@ -27,15 +28,14 @@ parser_init :: proc(lexer: ^lexer_package.Lexer) -> Parser {
 		lexer_package.Token{},
 		.Parser_Start,
 		"",
+		[dynamic]int{},
 	}
 }
 
 parser_parse :: proc(p: ^Parser, allocator := context.allocator) -> (document: YamlDocument) {
 	context.allocator = allocator
 
-	document = YamlDocument{
-		new(MappingNode),
-	}
+	document = YamlDocument{new(MappingNode)}
 
 	for p.state != .Parser_End {
 		switch p.state {
@@ -57,10 +57,13 @@ parser_parse :: proc(p: ^Parser, allocator := context.allocator) -> (document: Y
 			parser_expect(p, .Colon)
 			p.state = .Parser_Expect_Value
 		case .Parser_Expect_Value:
-			if p.current.kind == .Eof {
+			if p.current.kind == .Eof || p.current.kind == .StreamEnd {
 				p.state = .Parser_End
-			} else if p.current.kind == .StreamEnd {
-				p.state = .Parser_End
+			} else if p.current.kind == .Indent {
+				fmt.println("something");
+				append(&p.indent_stack, p.indent_stack[len(p.indent_stack) - 1] + 1)
+			} else if p.current.kind == .Dedent {
+				append(&p.indent_stack, p.indent_stack[len(p.indent_stack) - 1] - 1)
 			} else {
 				parser_expect(p, .Identifier, .String, .Integer, .Float)
 				p.state = .Parser_Expect_Newline
@@ -84,6 +87,7 @@ parser_parse :: proc(p: ^Parser, allocator := context.allocator) -> (document: Y
 parser_advance :: proc(p: ^Parser) {
 	p.previous = p.current
 	p.current = lexer_package.lexer_next_token(p.lexer)
+	fmt.println(p.current)
 }
 
 parser_match :: proc(p: ^Parser, kind: lexer_package.Token_Kind) -> bool {
