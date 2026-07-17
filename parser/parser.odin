@@ -53,11 +53,16 @@ parser_parse :: proc(p: ^Parser, allocator := context.allocator) -> (document: Y
 			} else {
 				parser_expect(p, .Identifier, .String, .Integer, .Float)
 
-				p.current_key = p.current.text
 				key_node := new(YamlNode)
 				key_node^ = YamlNode{.Scalar, ScalarNode{p.current_key, .String}}
 				value_node := new(YamlNode)
-				value_node^ = YamlNode{.Scalar, ScalarNode{p.previous.text, .String}}
+				value_type := ScalarType.String
+				if p.previous.kind == .Integer {
+					value_type = ScalarType.Integer
+				} else if p.previous.kind == .Float {
+					value_type = ScalarType.Float
+				}
+				value_node^ = YamlNode{.Scalar, ScalarNode{p.previous.text, value_type}}
 				pair := MappingPair{key_node, value_node}
 				append(&document.root.pairs, pair)
 
