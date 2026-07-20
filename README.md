@@ -6,7 +6,7 @@ I started this project because I wanted to work on something (even if it might e
 
 And no, I initially thought it was a great idea to match what the specification says in terms of how to implement it, but it was such a messy and complex architecture that I would never finish it in a reasonable amount of time. So, why not just build it my own way (even if it's not the "official" way and might lead to a bunch of bugs and stuff)?
 
-Also, reading the YAML spec was... an experience. Did you know YAML technically supports JSON as a subset? Yeah, I'm not gonna bother with that. Full spec compliance is completely out of scope - the spec is 70 pages of pure chaos and I will never use all of it anyway.
+Also, reading the YAML spec was... an experience. Did you know YAML technically supports JSON as a subset? Yeah, I'm not gonna bother with that. Full spec compliance is completely out of scope, the spec is 70 pages of pure chaos and I will never use all of it anyway.
 
 The lexer handles identifiers, quoted strings, integers, floats, indentation, stream markers, bullets, and colons. The parser is a recursive descent parser that handles flat and nested block mappings, block sequences, and typed scalar values (string, integer, float) with proper error propagation.
 
