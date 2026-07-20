@@ -8,10 +8,9 @@ And no, I initially thought it was a great idea to match what the specification 
 
 Also, reading the YAML spec was... an experience. Did you know YAML technically supports JSON as a subset? Yeah, I'm not gonna bother with that. Full spec compliance is completely out of scope - the spec is 70 pages of pure chaos and I will never use all of it anyway.
 
-Here's the current state of the project:
+The lexer handles identifiers, quoted strings, integers, floats, indentation, stream markers, bullets, and colons. The parser is a recursive descent parser that handles flat and nested block mappings, block sequences, and typed scalar values (string, integer, float) with proper error propagation.
 
-* **Lexer** [x] - Handles identifiers, quoted strings, integers, floats, indentation (`Indent`/`Dedent` tokens via an indent stack), stream markers (`---`), bullets (`- `), and colons. Pretty solid.
-* **Parser** [~] - Recursive-descent parser that can handle flat and nested block mappings. Scalar values are typed (string, integer, float). Errors are propagated with line:col reporting. Still missing sequences (the AST has `SequenceNode` but it's not wired up yet), and deeper nesting beyond the first indent level could use more testing. Flow sequences/containers are planned but not implemented.
+I think that's pretty much it for the core of it. Sure, there are things I could add like flow sequences or anchors, but honestly this does what I need it to do. Might add more stuff later, might not. We'll see.
 
 Hope you find this project at least a little bit useful and interesting :)))
 
