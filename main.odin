@@ -8,13 +8,35 @@ import yaml_error "yaml_error"
 
 main :: proc() {
 	source := `---
+# a leading comment
+name: yaml-parser
+version: 1.5
+build: 20260803
+pi: 3.14159
+count: -42
+hex: 0x1F
+scientific: 1.5e3
+enabled: true
+disabled: false
+nothing: null
+tilde: ~
+empty_value:
+quoted_key: "hello world"
+'single quoted key': works
+escaped: "line1\nline2\tend"
+with_comment: 42 # trailing comment
+
 parent_key:
 	child_key:
 		test_it_out: value
+		flag: true
+		ratio: 2.5
+	score: 0
 sequence_key:
 	- item1
 	- item2
 	- item3
+# comment before the stream end
 ---`
 
 	my_lexer := lexer.lexer_init(source)

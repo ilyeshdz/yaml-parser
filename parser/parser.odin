@@ -28,16 +28,17 @@ parser_init :: proc(lexer: ^lexer_package.Lexer) -> (Parser, yaml_error.YamlErro
 parser_parse :: proc(p: ^Parser, allocator := context.allocator) -> (document: YamlDocument, err: yaml_error.YamlError) {
 	context.allocator = allocator
 
-	document = YamlDocument{new(MappingNode)}
-	mapping := MappingNode{}
+	root := new(MappingNode)
+	document = YamlDocument{root}
+
+	err = skip_newlines(p)
+	if err != nil { return }
 
 	err = parser_expect(p, .StreamStart)
 	if err != nil { return }
 
-	err = parse_mapping(p, &mapping)
+	err = parse_mapping(p, root)
 	if err != nil { return }
-
-	document.root = &mapping
 
 	return
 }
@@ -50,10 +51,10 @@ parse_mapping :: proc(p: ^Parser, mapping: ^MappingNode) -> (err: yaml_error.Yam
 			return
 		}
 
-		err = parser_expect(p, .Identifier)
+		err = parser_expect(p, .Identifier, .String, .Integer, .Float)
 		if err != nil { return }
 		key := new(YamlNode)
-		key^ = YamlNode{.Scalar, ScalarNode{p.previous.text, .String}}
+		key^ = YamlNode{.Scalar, ScalarNode{p.previous.text, scalar_type_from_token(p.previous.kind)}}
 		err = parser_expect(p, .Colon)
 		if err != nil { return }
 
@@ -102,13 +103,23 @@ parse_value :: proc(p: ^Parser) -> (node: ^YamlNode, err: yaml_error.YamlError) 
 		return
 	}
 
+	// an empty value means null
+	if p.current.kind == .Dedent || p.current.kind == .Eof || p.current.kind == .StreamEnd || p.previous.kind == .Newline {
+		node^ = YamlNode{.Scalar, ScalarNode{"", .Null}}
+		return
+	}
+
 	err = parser_expect(p, .Identifier, .String, .Float, .Integer)
 	if err != nil { return }
-	scalar_type := ScalarType.String
-	if p.previous.kind == .Integer {
-		scalar_type = ScalarType.Integer
-	} else if p.previous.kind == .Float {
-		scalar_type = ScalarType.Float
+
+	scalar_type := scalar_type_from_token(p.previous.kind)
+	if p.previous.kind == .Identifier {
+		switch p.previous.text {
+		case "true", "false":
+			scalar_type = .Boolean
+		case "null", "~":
+			scalar_type = .Null
+		}
 	}
 	node^ = YamlNode{.Scalar, ScalarNode{p.previous.text, scalar_type}}
 	return
@@ -135,6 +146,17 @@ parse_sequence :: proc(p: ^Parser, seq: ^SequenceNode) -> (err: yaml_error.YamlE
 
 
 // The helpers functions
+
+scalar_type_from_token :: proc(kind: lexer_package.Token_Kind) -> ScalarType {
+	#partial switch kind {
+	case .Integer:
+		return .Integer
+	case .Float:
+		return .Float
+	case:
+		return .String
+	}
+}
 
 skip_newlines :: proc(p: ^Parser) -> (err: yaml_error.YamlError) {
 	for p.current.kind == .Newline {
