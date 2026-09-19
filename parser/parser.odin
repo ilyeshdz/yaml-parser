@@ -9,13 +9,11 @@ Parser :: struct {
 	current:      lexer_package.Token,
 	previous:     lexer_package.Token,
 	current_key:  string,
-	indent_stack: [dynamic]int,
 }
 
 parser_init :: proc(lexer: ^lexer_package.Lexer) -> (Parser, yaml_error.YamlError) {
 	p := Parser {
 		lexer        = lexer,
-		indent_stack = [dynamic]int{},
 	}
 	tok, err := lexer_package.lexer_next_token(lexer)
 	if err != nil {
