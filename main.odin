@@ -85,8 +85,11 @@ print_yaml_node :: proc(node: ^parser.YamlNode, depth: int = 0) {
             for _ in 0 ..< depth {
                 fmt.print("  ")
             }
-            key_str := pair.key.value.(parser.ScalarNode).value
-            fmt.printf("%s:\n", key_str)
+            if pair.key.kind == .Scalar {
+                fmt.printf("%s:\n", pair.key.value.(parser.ScalarNode).value)
+            } else {
+                fmt.printf("<complex key>:\n")
+            }
             print_yaml_node(pair.value, depth + 1)
         }
     case parser.SequenceNode:
