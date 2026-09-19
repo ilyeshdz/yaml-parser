@@ -6,6 +6,15 @@ import "lexer"
 import "parser"
 import yaml_error "yaml_error"
 
+print_error :: proc(err: yaml_error.YamlError) {
+	switch e in err {
+	case yaml_error.LexerError:
+		fmt.eprintf("Lexer error at %d:%d: %s\n", e.line, e.col, e.message)
+	case yaml_error.ParserError:
+		fmt.eprintf("Parser error at %d:%d: %s\n", e.line, e.col, e.message)
+	}
+}
+
 main :: proc() {
 	source := `---
 # a leading comment
@@ -47,23 +56,13 @@ sequence_key:
 
 	my_parser, p_err := parser.parser_init(&my_lexer)
 	if p_err != nil {
-		switch e in p_err {
-		case yaml_error.LexerError:
-			fmt.eprintf("Lexer error at %d:%d: %s\n", e.line, e.col, e.message)
-		case yaml_error.ParserError:
-			fmt.eprintf("Parser error at %d:%d: %s\n", e.line, e.col, e.message)
-		}
+		print_error(p_err)
 		return
 	}
 	document, err := parser.parser_parse(&my_parser, arena_allocator)
 
 	if err != nil {
-		switch e in err {
-		case yaml_error.LexerError:
-			fmt.eprintf("Lexer error at %d:%d: %s\n", e.line, e.col, e.message)
-		case yaml_error.ParserError:
-			fmt.eprintf("Parser error at %d:%d: %s\n", e.line, e.col, e.message)
-		}
+		print_error(err)
 		return
 	}
 
