@@ -2,12 +2,33 @@ package main
 
 import "core:mem"
 import "core:fmt"
+import "core:os"
 import "lexer"
 import "parser"
 import yaml_error "yaml_error"
 
+print_error :: proc(err: yaml_error.YamlError) {
+	switch e in err {
+	case yaml_error.LexerError:
+		fmt.eprintf("Lexer error at %d:%d: %s\n", e.line, e.col, e.message)
+	case yaml_error.ParserError:
+		fmt.eprintf("Parser error at %d:%d: %s\n", e.line, e.col, e.message)
+	}
+}
+
 main :: proc() {
-	source := `---
+	source: string
+	if len(os.args) > 1 {
+		filename := os.args[1]
+		fmt.printf("Parsing %s...\n", filename)
+		read, err := os.read_entire_file(filename, context.allocator)
+		if err != nil {
+			fmt.eprintf("Failed to read file %s: %v\n", filename, err)
+			return
+		}
+		source = string(read)
+	} else {
+		source = `---
 # a leading comment
 name: yaml-parser
 version: 1.5
@@ -38,6 +59,7 @@ sequence_key:
 	- item3
 # comment before the stream end
 ---`
+	}
 
 	my_lexer := lexer.lexer_init(source)
 	arena: mem.Dynamic_Arena
@@ -47,23 +69,13 @@ sequence_key:
 
 	my_parser, p_err := parser.parser_init(&my_lexer)
 	if p_err != nil {
-		switch e in p_err {
-		case yaml_error.LexerError:
-			fmt.eprintf("Lexer error at %d:%d: %s\n", e.line, e.col, e.message)
-		case yaml_error.ParserError:
-			fmt.eprintf("Parser error at %d:%d: %s\n", e.line, e.col, e.message)
-		}
+		print_error(p_err)
 		return
 	}
 	document, err := parser.parser_parse(&my_parser, arena_allocator)
 
 	if err != nil {
-		switch e in err {
-		case yaml_error.LexerError:
-			fmt.eprintf("Lexer error at %d:%d: %s\n", e.line, e.col, e.message)
-		case yaml_error.ParserError:
-			fmt.eprintf("Parser error at %d:%d: %s\n", e.line, e.col, e.message)
-		}
+		print_error(err)
 		return
 	}
 
