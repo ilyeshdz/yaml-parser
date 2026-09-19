@@ -2,6 +2,7 @@ package main
 
 import "core:mem"
 import "core:fmt"
+import "core:os"
 import "lexer"
 import "parser"
 import yaml_error "yaml_error"
@@ -16,7 +17,18 @@ print_error :: proc(err: yaml_error.YamlError) {
 }
 
 main :: proc() {
-	source := `---
+	source: string
+	if len(os.args) > 1 {
+		filename := os.args[1]
+		fmt.printf("Parsing %s...\n", filename)
+		read, err := os.read_entire_file(filename, context.allocator)
+		if err != nil {
+			fmt.eprintf("Failed to read file %s: %v\n", filename, err)
+			return
+		}
+		source = string(read)
+	} else {
+		source = `---
 # a leading comment
 name: yaml-parser
 version: 1.5
@@ -47,6 +59,7 @@ sequence_key:
 	- item3
 # comment before the stream end
 ---`
+	}
 
 	my_lexer := lexer.lexer_init(source)
 	arena: mem.Dynamic_Arena
@@ -84,8 +97,11 @@ print_yaml_node :: proc(node: ^parser.YamlNode, depth: int = 0) {
             for _ in 0 ..< depth {
                 fmt.print("  ")
             }
-            key_str := pair.key.value.(parser.ScalarNode).value
-            fmt.printf("%s:\n", key_str)
+            if pair.key.kind == .Scalar {
+                fmt.printf("%s:\n", pair.key.value.(parser.ScalarNode).value)
+            } else {
+                fmt.printf("<complex key>:\n")
+            }
             print_yaml_node(pair.value, depth + 1)
         }
     case parser.SequenceNode:
