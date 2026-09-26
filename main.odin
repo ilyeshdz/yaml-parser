@@ -3,13 +3,16 @@ package main
 import "core:mem"
 import "core:fmt"
 import "core:os"
+import "core:strconv"
+import "core:strings"
 import "lexer"
 import "parser"
 import yaml_error "yaml_error"
 
-EXIT_OK          :: 0
-EXIT_PARSE_ERROR :: 1
-EXIT_USAGE_ERROR :: 2
+EXIT_OK           :: 0
+EXIT_PARSE_ERROR  :: 1
+EXIT_USAGE_ERROR  :: 2
+EXIT_LOOKUP_ERROR :: 3
 
 SAMPLE_NAME :: "the built-in sample"
 
@@ -59,6 +62,23 @@ Load_Error :: union {
 	yaml_error.YamlError,
 }
 
+Lookup_Error_Kind :: enum {
+	None,
+	Empty_Path,
+	Empty_Segment,
+	Key_Not_Found,
+	Not_A_Collection,
+	Not_An_Index,
+	Index_Out_Of_Range,
+}
+
+Lookup_Error :: struct {
+	kind:      Lookup_Error_Kind,
+	segment:   string,
+	index:     int,
+	node_kind: parser.YamlNodeKind,
+}
+
 print_load_error :: proc(err: Load_Error, filename: string) {
 	switch e in err {
 	case os.Error:
@@ -68,18 +88,45 @@ print_load_error :: proc(err: Load_Error, filename: string) {
 	}
 }
 
+print_lookup_error :: proc(err: Lookup_Error, path: string) {
+	switch err.kind {
+	case .None:
+		return
+	case .Empty_Path:
+		fmt.eprintf("Error: the key path is empty\n")
+	case .Empty_Segment:
+		fmt.eprintf("Error: path '%s' has an empty segment\n", path)
+	case .Key_Not_Found:
+		fmt.eprintf("Error: no key '%s' in path '%s'\n", err.segment, path)
+	case .Not_A_Collection:
+		fmt.eprintf("Error: '%s' holds a %v, so the rest of path '%s' cannot be resolved\n", err.segment, err.node_kind, path)
+	case .Not_An_Index:
+		fmt.eprintf("Error: '%s' holds a sequence, so '%s' has to be an index\n", err.segment, err.segment)
+	case .Index_Out_Of_Range:
+		fmt.eprintf("Error: index %d is out of range for the sequence at '%s'\n", err.index, err.segment)
+	}
+}
+
 print_usage :: proc(f: ^os.File) {
-	fmt.fprintf(f, `yaml-parser, a YAML parser for YAML files
+	fmt.fprintf(f, `yaml-parser, a YAML parser that pulls single values out of a file
 
 Usage:
   yaml-parser                          parse and print the built-in sample
   yaml-parser dump <file>              parse <file> and print the whole tree
+  yaml-parser get <file> <key.path>    print the value found at <key.path>
+  yaml-parser get <file> <key.path> -t print the type of that value instead
   yaml-parser help                     print this message
+
+Key paths are dot separated, and a numeric segment indexes a sequence:
+
+  yaml-parser get config.yaml parent_key.child_key.test_it_out
+  yaml-parser get config.yaml sequence_key.1
 
 Exit codes:
   0  the value was printed
   1  the file could not be read or parsed
   2  the command was used wrong
+  3  the key path was not found
 `)
 }
 
@@ -114,6 +161,80 @@ load_document :: proc(filename: string, allocator := context.allocator) -> (docu
 	return parse_source(string(source), allocator)
 }
 
+node_lookup :: proc(root: ^parser.YamlNode, path: string) -> (node: ^parser.YamlNode, err: Lookup_Error) {
+	if path == "" {
+		return nil, Lookup_Error{kind = .Empty_Path}
+	}
+
+	node = root
+	remaining := path
+
+	for segment in strings.split_iterator(&remaining, ".") {
+		if segment == "" {
+			return nil, Lookup_Error{kind = .Empty_Segment}
+		}
+
+		switch v in node.value {
+		case parser.MappingNode:
+			found := false
+			for pair in v.pairs {
+				key, is_scalar := pair.key.value.(parser.ScalarNode)
+				if !is_scalar || key.value != segment {
+					continue
+				}
+				node = pair.value
+				found = true
+				break
+			}
+			if !found {
+				return nil, Lookup_Error{kind = .Key_Not_Found, segment = segment}
+			}
+		case parser.SequenceNode:
+			index, is_index := strconv.parse_int(segment, 10)
+			if !is_index {
+				return nil, Lookup_Error{kind = .Not_An_Index, segment = segment}
+			}
+			if index < 0 || index >= len(v.items) {
+				return nil, Lookup_Error{kind = .Index_Out_Of_Range, segment = segment, index = index}
+			}
+			node = v.items[index]
+		case parser.ScalarNode:
+			return nil, Lookup_Error{kind = .Not_A_Collection, segment = segment, node_kind = node.kind}
+		}
+	}
+
+	return node, Lookup_Error{}
+}
+
+print_value :: proc(node: ^parser.YamlNode) {
+	if scalar, is_scalar := node.value.(parser.ScalarNode); is_scalar {
+		fmt.println(scalar.value)
+		return
+	}
+
+	print_yaml_node(node, 0)
+}
+
+print_scalar_type :: proc(node: ^parser.YamlNode) {
+	scalar, is_scalar := node.value.(parser.ScalarNode)
+	if !is_scalar {
+		return
+	}
+
+	switch scalar.type {
+	case .String:
+		fmt.println("string")
+	case .Integer:
+		fmt.println("integer")
+	case .Float:
+		fmt.println("float")
+	case .Boolean:
+		fmt.println("boolean")
+	case .Null:
+		fmt.println("null")
+	}
+}
+
 run_dump :: proc(filename: string, allocator := context.allocator) -> int {
 	label := filename
 	document: parser.YamlDocument
@@ -132,6 +253,50 @@ run_dump :: proc(filename: string, allocator := context.allocator) -> int {
 	}
 
 	print_yaml_node(document.root, 0)
+	return EXIT_OK
+}
+
+run_get :: proc(args: []string, allocator := context.allocator) -> int {
+	if len(args) < 2 {
+		return report_usage_error("get takes a file and a key path")
+	}
+	if len(args) > 3 {
+		return report_usage_error("get takes a file, a key path and an optional -t")
+	}
+
+	filename := args[0]
+	path := args[1]
+
+	show_type := false
+	if len(args) == 3 {
+		if args[2] != "-t" && args[2] != "--type" {
+			return report_usage_error(fmt.tprintf("unknown option '%s' for get", args[2]))
+		}
+		show_type = true
+	}
+
+	document, err := load_document(filename, allocator)
+	if err != nil {
+		print_load_error(err, filename)
+		return EXIT_PARSE_ERROR
+	}
+
+	node, lookup_err := node_lookup(document.root, path)
+	if lookup_err.kind != .None {
+		print_lookup_error(lookup_err, path)
+		return EXIT_LOOKUP_ERROR
+	}
+
+	if show_type {
+		if node.kind != .Scalar {
+			fmt.eprintf("Error: '%s' is a %v, so it has no scalar type\n", path, node.kind)
+			return EXIT_USAGE_ERROR
+		}
+		print_scalar_type(node)
+		return EXIT_OK
+	}
+
+	print_value(node)
 	return EXIT_OK
 }
 
@@ -158,6 +323,8 @@ run :: proc(args: []string) -> int {
 			filename = args[2]
 		}
 		return run_dump(filename, allocator)
+	case "get":
+		return run_get(args[2:], allocator)
 	}
 
 	return report_usage_error(fmt.tprintf("unknown command '%s'", args[1]))
