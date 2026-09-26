@@ -14,6 +14,8 @@ Lexer :: struct {
 	within_stream: bool,
 	indent_stack:  [dynamic]int,
 	is_new_line:   bool,
+	line_indent:   int,
+	has_line_indent: bool,
 }
 
 lexer_init :: proc(input: string) -> Lexer {
@@ -54,6 +56,7 @@ lexer_skip_comment :: proc(l: ^Lexer) {
 		l.line += 1
 		l.col = 0
 		l.is_new_line = true
+		l.has_line_indent = false
 		lexer_read_char(l)
 	}
 }
@@ -115,14 +118,24 @@ lexer_next_token :: proc(l: ^Lexer) -> (tok: Token, err: yaml_error.YamlError) {
 		// new-line/indent decision for each line until real content is found
 		for {
 			l.is_new_line = false
-			leading_space := 0
-			for l.ch == ' ' || l.ch == '\t' {
-				leading_space += 1
-				lexer_read_char(l)
+
+			// a line that is dedenting keeps the indentation it was measured
+			// with, otherwise the spaces are gone and every dedent looks like
+			// a dedent to column zero
+			leading_space := l.line_indent
+			if !l.has_line_indent {
+				leading_space = 0
+				for l.ch == ' ' || l.ch == '\t' {
+					leading_space += 1
+					lexer_read_char(l)
+				}
+				l.line_indent = leading_space
+				l.has_line_indent = true
 			}
 
 			if l.ch == '#' {
 				lexer_skip_comment(l)
+				l.has_line_indent = false
 				continue
 			}
 
@@ -208,6 +221,7 @@ lexer_next_token :: proc(l: ^Lexer) -> (tok: Token, err: yaml_error.YamlError) {
 		l.line += 1
 		l.col = 0
 		l.is_new_line = true
+		l.has_line_indent = false
 		lexer_read_char(l)
 
 	case '"', '\'':
