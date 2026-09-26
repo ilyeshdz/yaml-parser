@@ -67,7 +67,9 @@ Lookup_Error_Kind :: enum {
 	Empty_Path,
 	Empty_Segment,
 	Key_Not_Found,
+	Key_Exists,
 	Not_A_Collection,
+	Not_A_Mapping,
 	Not_An_Index,
 	Index_Out_Of_Range,
 }
@@ -98,8 +100,12 @@ print_lookup_error :: proc(err: Lookup_Error, path: string) {
 		fmt.eprintf("Error: path '%s' has an empty segment\n", path)
 	case .Key_Not_Found:
 		fmt.eprintf("Error: no key '%s' in path '%s'\n", err.segment, path)
+	case .Key_Exists:
+		fmt.eprintf("Error: key '%s' already exists in path '%s'\n", err.segment, path)
 	case .Not_A_Collection:
 		fmt.eprintf("Error: '%s' holds a %v, so the rest of path '%s' cannot be resolved\n", err.segment, err.node_kind, path)
+	case .Not_A_Mapping:
+		fmt.eprintf("Error: '%s' is a %v, so no key can live inside it\n", err.segment, err.node_kind)
 	case .Not_An_Index:
 		fmt.eprintf("Error: '%s' holds a sequence, so '%s' has to be an index\n", err.segment, err.segment)
 	case .Index_Out_Of_Range:
@@ -204,6 +210,175 @@ node_lookup :: proc(root: ^parser.YamlNode, path: string) -> (node: ^parser.Yaml
 	}
 
 	return node, Lookup_Error{}
+}
+
+// node_edit returns a copy of the document with one key changed. Nodes are
+// never touched in place, because a mapping lives inside a union and a union
+// cannot hand out a pointer to what it holds, so only the spine from the root
+// down to the change is rebuilt. When create is true a missing key is added,
+// along with any mapping the path needs on its way there.
+node_edit :: proc(node: ^parser.YamlNode, path: string, value: ^parser.YamlNode, create: bool) -> (edited: ^parser.YamlNode, err: Lookup_Error) {
+	if path == "" {
+		return nil, Lookup_Error{kind = .Empty_Path}
+	}
+
+	dot := strings.last_index_byte(path, '.')
+	segment := path
+	parent_path := ""
+	head := ""
+	if dot >= 0 {
+		segment = path[dot + 1:]
+		parent_path = path[:dot]
+		head = parent_path
+		if head_dot := strings.index_byte(head, '.'); head_dot >= 0 {
+			head = head[:head_dot]
+		}
+	}
+
+	if segment == "" {
+		return nil, Lookup_Error{kind = .Empty_Segment}
+	}
+
+	mapping, is_mapping := node.value.(parser.MappingNode)
+	if !is_mapping {
+		kind := Lookup_Error_Kind.Not_A_Collection
+		if node.kind == .Sequence {
+			kind = .Not_A_Mapping
+		}
+		return nil, Lookup_Error{kind = kind, segment = segment, node_kind = node.kind}
+	}
+
+	// the rest of the path is edited first, so the change lands bottom up
+	child_index := -1
+	child: ^parser.YamlNode
+	if parent_path != "" {
+		child_index = mapping_pair_index(mapping, head)
+		if child_index < 0 && !create {
+			return nil, Lookup_Error{kind = .Key_Not_Found, segment = head}
+		}
+
+		source := wrap_mapping(nil)
+		if child_index >= 0 {
+			source = mapping.pairs[child_index].value
+		}
+
+		child, err = node_edit(source, parent_path, value, create)
+		if err.kind != .None {
+			return nil, err
+		}
+	}
+
+	pairs: [dynamic]parser.MappingPair
+	for pair in mapping.pairs {
+		append(&pairs, pair)
+	}
+	if child_index >= 0 {
+		pairs[child_index].value = child
+	}
+	if child_index < 0 && parent_path != "" {
+		append(&pairs, new_pair(head, child))
+	}
+
+	// the recursion already dealt with the last segment when the path continues
+	if parent_path != "" {
+		return wrap_mapping(pairs), Lookup_Error{}
+	}
+
+	index := mapping_pair_index(mapping, segment)
+	switch {
+	case index >= 0 && create:
+		return nil, Lookup_Error{kind = .Key_Exists, segment = segment}
+	case index >= 0:
+		pairs[index].value = value
+	case create:
+		append(&pairs, new_pair(segment, value))
+	case:
+		return nil, Lookup_Error{kind = .Key_Not_Found, segment = segment}
+	}
+
+	return wrap_mapping(pairs), Lookup_Error{}
+}
+
+mapping_pair_index :: proc(mapping: parser.MappingNode, segment: string) -> int {
+	for pair, index in mapping.pairs {
+		key, is_scalar := pair.key.value.(parser.ScalarNode)
+		if is_scalar && key.value == segment {
+			return index
+		}
+	}
+	return -1
+}
+
+new_pair :: proc(segment: string, value: ^parser.YamlNode) -> parser.MappingPair {
+	key := new(parser.YamlNode)
+	key^ = parser.YamlNode{.Scalar, parser.ScalarNode{segment, .String}}
+	return parser.MappingPair{key, value}
+}
+
+wrap_mapping :: proc(pairs: [dynamic]parser.MappingPair) -> ^parser.YamlNode {
+	node := new(parser.YamlNode)
+	node^ = parser.YamlNode{.Mapping, parser.MappingNode{pairs}}
+	return node
+}
+
+// scalar_from_text types a value the same way the parser types what it reads,
+// so a value written by set and add comes back out of get with the same type.
+scalar_from_text :: proc(text: string) -> parser.ScalarNode {
+	switch text {
+	case "true", "false":
+		return parser.ScalarNode{text, .Boolean}
+	case "null", "~":
+		return parser.ScalarNode{text, .Null}
+	}
+
+	if is_number(text) {
+		kind := parser.ScalarType.Integer
+		if is_float_text(text) {
+			kind = .Float
+		}
+		return parser.ScalarNode{text, kind}
+	}
+
+	return parser.ScalarNode{text, .String}
+}
+
+scalar_node :: proc(text: string) -> ^parser.YamlNode {
+	node := new(parser.YamlNode)
+	node^ = parser.YamlNode{.Scalar, scalar_from_text(text)}
+	return node
+}
+
+// a dot or an exponent anywhere is what makes the lexer call a number a float
+is_float_text :: proc(text: string) -> bool {
+	for i in 0 ..< len(text) {
+		switch text[i] {
+		case '.', 'e', 'E':
+			return true
+		}
+	}
+	return false
+}
+
+is_number :: proc(text: string) -> bool {
+	if text == "" {
+		return false
+	}
+
+	digits := text
+	if digits[0] == '-' || digits[0] == '+' {
+		digits = digits[1:]
+	}
+	if digits == "" {
+		return false
+	}
+
+	if is_float_text(digits) {
+		_, ok := strconv.parse_f64(text)
+		return ok
+	}
+
+	_, ok := strconv.parse_int(text)
+	return ok
 }
 
 print_value :: proc(node: ^parser.YamlNode) {
