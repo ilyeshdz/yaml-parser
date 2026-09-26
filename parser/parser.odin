@@ -53,6 +53,18 @@ parse_mapping :: proc(p: ^Parser, mapping: ^MappingNode) -> (err: yaml_error.Yam
 			return
 		}
 
+		// a key that is indented further than the line before it dedented to
+		// means the file mixes indentation levels that do not line up
+		if p.current.kind == .Indent {
+			err = yaml_error.ParserError {
+				kind    = .InvalidIndentation,
+				message = "unexpected indentation, a key has to line up with the keys above it",
+				line    = p.current.line,
+				col     = p.current.col,
+			}
+			return
+		}
+
 		err = parser_expect(p, .Identifier, .String, .Integer, .Float)
 		if err != nil { return }
 		key := new(YamlNode)
