@@ -55,9 +55,9 @@ name: next-version
 ...
 ```
 
-`add` makes the mappings the path needs on its way down, and complains if the key is already there, while `set` only replaces what is already in the file. The value is typed the way the parser would type it, so `1.5` comes back as a float, `true` as a boolean, and anything with a space in it gets quoted for you.
+`add` makes the mappings the path needs on its way down, and complains if the key is already there, while `set` only replaces what is already in the file. The value is typed the way the parser would type it, so `1.5` comes back as a float, `true` as a boolean, and anything with a space in it gets quoted for you. There is no way to ask for a string, so `42` is always the integer 42.
 
-The catch is that the document gets written back out from the parsed tree, so comments, blank lines, quote style, and the exact spacing of the original are gone, and a string that looks like a number will read back as a number unless you quote it yourself. That is the price of not keeping the source around, and `--dry-run` is there so you can see the result before it lands. Keys inside a sequence, like `sequence_key.0`, cannot be edited yet, only mapping keys.
+The catch is that the document gets written back out from the parsed tree, so comments, blank lines, quote style, and the exact spacing of the original are gone. That is the price of not keeping the source around, and `--dry-run` is there so you can see the result before it lands. Keys inside a sequence, like `sequence_key.0`, cannot be edited yet, only mapping keys.
 
 Hope you find this project at least a little bit useful and interesting :)))
 
