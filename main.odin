@@ -79,10 +79,7 @@ sequence_key:
 		return
 	}
 
-	root_node: parser.YamlNode
-	root_node.kind = .Mapping
-	root_node.value = document.root^
-	print_yaml_node(&root_node)
+	print_yaml_node(document.root, 0)
 }
 
 print_yaml_node :: proc(node: ^parser.YamlNode, depth: int = 0) {

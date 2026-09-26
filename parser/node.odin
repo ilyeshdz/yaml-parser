@@ -42,5 +42,5 @@ SequenceNode :: struct {
 }
 
 YamlDocument :: struct {
-	root: ^MappingNode,
+	root: ^YamlNode,
 }

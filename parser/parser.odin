@@ -27,7 +27,6 @@ parser_parse :: proc(p: ^Parser, allocator := context.allocator) -> (document: Y
 	context.allocator = allocator
 
 	root := new(MappingNode)
-	document = YamlDocument{root}
 
 	err = skip_newlines(p)
 	if err != nil { return }
@@ -38,6 +37,11 @@ parser_parse :: proc(p: ^Parser, allocator := context.allocator) -> (document: Y
 	err = parse_mapping(p, root)
 	if err != nil { return }
 
+	// the node wraps the mapping only once every pair has been appended, so the
+	// copy of the pair slice sees the final length
+	root_node := new(YamlNode)
+	root_node^ = YamlNode{.Mapping, root^}
+	document = YamlDocument{root_node}
 	return
 }
 
