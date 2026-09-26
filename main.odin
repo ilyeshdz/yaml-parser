@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:os"
 import "core:strconv"
 import "core:strings"
+import "emitter"
 import "lexer"
 import "parser"
 import yaml_error "yaml_error"
@@ -13,8 +14,15 @@ EXIT_OK           :: 0
 EXIT_PARSE_ERROR  :: 1
 EXIT_USAGE_ERROR  :: 2
 EXIT_LOOKUP_ERROR :: 3
+EXIT_WRITE_ERROR  :: 4
 
 SAMPLE_NAME :: "the built-in sample"
+
+// set replaces a value that is already there, add puts a new key in
+Edit_Mode :: enum {
+	Set,
+	Add,
+}
 
 SAMPLE_DOCUMENT :: `---
 # a leading comment
@@ -121,6 +129,8 @@ Usage:
   yaml-parser dump <file>              parse <file> and print the whole tree
   yaml-parser get <file> <key.path>    print the value found at <key.path>
   yaml-parser get <file> <key.path> -t print the type of that value instead
+  yaml-parser set <file> <key.path> <value> replace the value at <key.path>
+  yaml-parser add <file> <key.path> <value> add a new key at <key.path>
   yaml-parser help                     print this message
 
 Key paths are dot separated, and a numeric segment indexes a sequence:
@@ -128,11 +138,17 @@ Key paths are dot separated, and a numeric segment indexes a sequence:
   yaml-parser get config.yaml parent_key.child_key.test_it_out
   yaml-parser get config.yaml sequence_key.1
 
+set and add write the whole file back out, which means comments and the
+original spacing are not kept. Pass --dry-run to see the result first. The
+value is typed the way the parser would type it, so 1.5 is a float and true is
+a boolean, while adding needs a key and not a sequence index.
+
 Exit codes:
   0  the value was printed
   1  the file could not be read or parsed
   2  the command was used wrong
-  3  the key path was not found
+  3  the key path was not found, or was already there
+  4  the file could not be written
 `)
 }
 
@@ -222,78 +238,64 @@ node_edit :: proc(node: ^parser.YamlNode, path: string, value: ^parser.YamlNode,
 		return nil, Lookup_Error{kind = .Empty_Path}
 	}
 
-	dot := strings.last_index_byte(path, '.')
-	segment := path
-	parent_path := ""
-	head := ""
-	if dot >= 0 {
-		segment = path[dot + 1:]
-		parent_path = path[:dot]
-		head = parent_path
-		if head_dot := strings.index_byte(head, '.'); head_dot >= 0 {
-			head = head[:head_dot]
-		}
-	}
-
-	if segment == "" {
-		return nil, Lookup_Error{kind = .Empty_Segment}
-	}
-
 	mapping, is_mapping := node.value.(parser.MappingNode)
 	if !is_mapping {
 		kind := Lookup_Error_Kind.Not_A_Collection
 		if node.kind == .Sequence {
 			kind = .Not_A_Mapping
 		}
-		return nil, Lookup_Error{kind = kind, segment = segment, node_kind = node.kind}
-	}
-
-	// the rest of the path is edited first, so the change lands bottom up
-	child_index := -1
-	child: ^parser.YamlNode
-	if parent_path != "" {
-		child_index = mapping_pair_index(mapping, head)
-		if child_index < 0 && !create {
-			return nil, Lookup_Error{kind = .Key_Not_Found, segment = head}
-		}
-
-		source := wrap_mapping(nil)
-		if child_index >= 0 {
-			source = mapping.pairs[child_index].value
-		}
-
-		child, err = node_edit(source, parent_path, value, create)
-		if err.kind != .None {
-			return nil, err
-		}
+		return nil, Lookup_Error{kind = kind, segment = path, node_kind = node.kind}
 	}
 
 	pairs: [dynamic]parser.MappingPair
 	for pair in mapping.pairs {
 		append(&pairs, pair)
 	}
-	if child_index >= 0 {
-		pairs[child_index].value = child
-	}
-	if child_index < 0 && parent_path != "" {
-		append(&pairs, new_pair(head, child))
-	}
 
-	// the recursion already dealt with the last segment when the path continues
-	if parent_path != "" {
+	first_dot := strings.index_byte(path, '.')
+
+	// a path of one segment is the key to write into this mapping
+	if first_dot < 0 {
+		index := mapping_pair_index(mapping, path)
+		switch {
+		case index >= 0 && create:
+			return nil, Lookup_Error{kind = .Key_Exists, segment = path}
+		case index >= 0:
+			pairs[index].value = value
+		case create:
+			append(&pairs, new_pair(path, value))
+		case:
+			return nil, Lookup_Error{kind = .Key_Not_Found, segment = path}
+		}
 		return wrap_mapping(pairs), Lookup_Error{}
 	}
 
-	index := mapping_pair_index(mapping, segment)
-	switch {
-	case index >= 0 && create:
-		return nil, Lookup_Error{kind = .Key_Exists, segment = segment}
-	case index >= 0:
-		pairs[index].value = value
-	case create:
-		append(&pairs, new_pair(segment, value))
-	case:
-		return nil, Lookup_Error{kind = .Key_Not_Found, segment = segment}
+	// a longer path goes through the key it starts with
+	head := path[:first_dot]
+	child_path := path[first_dot + 1:]
+	if head == "" || child_path == "" {
+		return nil, Lookup_Error{kind = .Empty_Segment}
+	}
+
+	child_index := mapping_pair_index(mapping, head)
+	if child_index < 0 && !create {
+		return nil, Lookup_Error{kind = .Key_Not_Found, segment = head}
+	}
+
+	source := wrap_mapping(nil)
+	if child_index >= 0 {
+		source = mapping.pairs[child_index].value
+	}
+
+	child, child_err := node_edit(source, child_path, value, create)
+	if child_err.kind != .None {
+		return nil, child_err
+	}
+
+	if child_index >= 0 {
+		pairs[child_index].value = child
+	} else {
+		append(&pairs, new_pair(head, child))
 	}
 
 	return wrap_mapping(pairs), Lookup_Error{}
@@ -475,6 +477,74 @@ run_get :: proc(args: []string, allocator := context.allocator) -> int {
 	return EXIT_OK
 }
 
+run_edit :: proc(args: []string, mode: Edit_Mode, allocator := context.allocator) -> int {
+	name := edit_mode_name(mode)
+
+	if len(args) < 3 {
+		return report_usage_error(fmt.tprintf("%s takes a file, a key path and a value", name))
+	}
+	if len(args) > 4 {
+		return report_usage_error(fmt.tprintf("%s takes a file, a key path, a value and an optional --dry-run", name))
+	}
+
+	filename := args[0]
+	path := args[1]
+	text := args[2]
+
+	dry_run := false
+	if len(args) == 4 {
+		if args[3] != "--dry-run" {
+			return report_usage_error(fmt.tprintf("unknown option '%s' for %s", args[3], name))
+		}
+		dry_run = true
+	}
+
+	source, read_err := os.read_entire_file(filename, context.allocator)
+	if read_err != nil {
+		fmt.eprintf("Failed to read file %s: %v\n", filename, read_err)
+		return EXIT_PARSE_ERROR
+	}
+
+	document, err := parse_source(string(source), allocator)
+	if err != nil {
+		print_load_error(err, filename)
+		return EXIT_PARSE_ERROR
+	}
+
+	value := scalar_node(text)
+	edited, lookup_err := node_edit(document.root, path, value, mode == .Add)
+	if lookup_err.kind != .None {
+		print_lookup_error(lookup_err, path)
+		return EXIT_LOOKUP_ERROR
+	}
+
+	output := emitter.emit_document(edited, emitter.detect_indent(string(source)), allocator)
+
+	if dry_run {
+		fmt.print(output)
+		return EXIT_OK
+	}
+
+	write_err := os.write_entire_file_from_string(filename, output)
+	if write_err != nil {
+		fmt.eprintf("Failed to write file %s: %v\n", filename, write_err)
+		return EXIT_WRITE_ERROR
+	}
+
+	print_value(value)
+	return EXIT_OK
+}
+
+edit_mode_name :: proc(mode: Edit_Mode) -> string {
+	switch mode {
+	case .Set:
+		return "set"
+	case .Add:
+		return "add"
+	}
+	return ""
+}
+
 run :: proc(args: []string) -> int {
 	arena: mem.Dynamic_Arena
 	mem.dynamic_arena_init(&arena)
@@ -500,6 +570,10 @@ run :: proc(args: []string) -> int {
 		return run_dump(filename, allocator)
 	case "get":
 		return run_get(args[2:], allocator)
+	case "set":
+		return run_edit(args[2:], .Set, allocator)
+	case "add":
+		return run_edit(args[2:], .Add, allocator)
 	}
 
 	return report_usage_error(fmt.tprintf("unknown command '%s'", args[1]))
