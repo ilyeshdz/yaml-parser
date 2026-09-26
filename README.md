@@ -49,6 +49,12 @@ $ yaml-parser add config.yaml parent_key.new_child hello
 hello
 $ yaml-parser add config.yaml parent_key.another.nested_leaf 42
 42
+$ yaml-parser set config.yaml sequence_key.1 item9
+item9
+$ yaml-parser add config.yaml sequence_key.0 first
+first
+$ yaml-parser add config.yaml sequence_key item4
+item4
 $ yaml-parser set config.yaml name next-version --dry-run
 ---
 name: next-version
@@ -57,7 +63,9 @@ name: next-version
 
 `add` makes the mappings the path needs on its way down, and complains if the key is already there, while `set` only replaces what is already in the file. The value is typed the way the parser would type it, so `1.5` comes back as a float, `true` as a boolean, and anything with a space in it gets quoted for you. There is no way to ask for a string, so `42` is always the integer 42.
 
-The catch is that the document gets written back out from the parsed tree, so comments, blank lines, quote style, and the exact spacing of the original are gone. That is the price of not keeping the source around, and `--dry-run` is there so you can see the result before it lands. Keys inside a sequence, like `sequence_key.0`, cannot be edited yet, only mapping keys.
+A numeric path segment edits a list, so `set config.yaml sequence_key.1 item9` replaces the second item and `add config.yaml sequence_key.0 first` puts a new item in front of it. Adding at the length of the list appends to it, and adding to a key that is a list without an index appends as well, which is what the last example above does. Only items that are already in the list can be set, so an index past the end is an error.
+
+The catch is that the document gets written back out from the parsed tree, so comments, blank lines, quote style, and the exact spacing of the original are gone. That is the price of not keeping the source around, and `--dry-run` is there so you can see the result before it lands. The parser only reads lists of plain values for now, so a list of lists or a list of mappings cannot be written yet, even though the editing side is ready for it.
 
 Hope you find this project at least a little bit useful and interesting :)))
 
