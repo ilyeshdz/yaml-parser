@@ -141,7 +141,12 @@ Key paths are dot separated, and a numeric segment indexes a sequence:
 set and add write the whole file back out, which means comments and the
 original spacing are not kept. Pass --dry-run to see the result first. The
 value is typed the way the parser would type it, so 1.5 is a float and true is
-a boolean, while adding needs a key and not a sequence index.
+a boolean.
+
+A numeric path segment edits a list item, where set replaces the item and add
+puts the value in front of it, so adding at the length of the list appends to
+it. Adding to a key that is a list without an index appends to the list, and
+makes a new key when the key is not there yet.
 
 Exit codes:
   0  the value was printed
@@ -238,6 +243,11 @@ node_edit :: proc(node: ^parser.YamlNode, path: string, value: ^parser.YamlNode,
 		return nil, Lookup_Error{kind = .Empty_Path}
 	}
 
+	sequence, is_sequence := node.value.(parser.SequenceNode)
+	if is_sequence {
+		return sequence_edit(sequence, path, value, create)
+	}
+
 	mapping, is_mapping := node.value.(parser.MappingNode)
 	if !is_mapping {
 		kind := Lookup_Error_Kind.Not_A_Collection
@@ -259,7 +269,13 @@ node_edit :: proc(node: ^parser.YamlNode, path: string, value: ^parser.YamlNode,
 		index := mapping_pair_index(mapping, path)
 		switch {
 		case index >= 0 && create:
-			return nil, Lookup_Error{kind = .Key_Exists, segment = path}
+			// adding to a key that is a sequence appends to it, anything else
+			// is already holding a value and is left alone
+			existing, is_list := pairs[index].value.value.(parser.SequenceNode)
+			if !is_list {
+				return nil, Lookup_Error{kind = .Key_Exists, segment = path}
+			}
+			pairs[index].value = sequence_append(existing, value)
 		case index >= 0:
 			pairs[index].value = value
 		case create:
@@ -320,6 +336,92 @@ new_pair :: proc(segment: string, value: ^parser.YamlNode) -> parser.MappingPair
 wrap_mapping :: proc(pairs: [dynamic]parser.MappingPair) -> ^parser.YamlNode {
 	node := new(parser.YamlNode)
 	node^ = parser.YamlNode{.Mapping, parser.MappingNode{pairs}}
+	return node
+}
+
+// sequence_edit edits one item of a sequence. The head of the path is the
+// index, so the same key path that get walks also walks a list. set replaces
+// the item it is given and add puts the value in front of it, which appends
+// when the index is the length of the sequence.
+sequence_edit :: proc(sequence: parser.SequenceNode, path: string, value: ^parser.YamlNode, create: bool) -> (edited: ^parser.YamlNode, err: Lookup_Error) {
+	first_dot := strings.index_byte(path, '.')
+
+	head := path
+	child_path := ""
+	if first_dot >= 0 {
+		head = path[:first_dot]
+		child_path = path[first_dot + 1:]
+		if head == "" || child_path == "" {
+			return nil, Lookup_Error{kind = .Empty_Segment}
+		}
+	}
+
+	index, is_index := strconv.parse_int(head, 10)
+	if !is_index {
+		return nil, Lookup_Error{kind = .Not_An_Index, segment = head}
+	}
+	if index < 0 {
+		return nil, Lookup_Error{kind = .Index_Out_Of_Range, segment = head, index = index}
+	}
+
+	items: [dynamic]^parser.YamlNode
+	for item in sequence.items {
+		append(&items, item)
+	}
+
+	// the index itself is the item to change
+	if child_path == "" {
+		if !create {
+			if index >= len(items) {
+				return nil, Lookup_Error{kind = .Index_Out_Of_Range, segment = head, index = index}
+			}
+			items[index] = value
+			return wrap_sequence(items), Lookup_Error{}
+		}
+
+		if index > len(items) {
+			return nil, Lookup_Error{kind = .Index_Out_Of_Range, segment = head, index = index}
+		}
+
+		inserted: [dynamic]^parser.YamlNode
+		for item, position in items {
+			if position == index {
+				append(&inserted, value)
+			}
+			append(&inserted, item)
+		}
+		if index == len(items) {
+			append(&inserted, value)
+		}
+		return wrap_sequence(inserted), Lookup_Error{}
+	}
+
+	// the path keeps going, so the item is edited from the inside
+	if index >= len(items) {
+		return nil, Lookup_Error{kind = .Index_Out_Of_Range, segment = head, index = index}
+	}
+
+	child, child_err := node_edit(items[index], child_path, value, create)
+	if child_err.kind != .None {
+		return nil, child_err
+	}
+	items[index] = child
+
+	return wrap_sequence(items), Lookup_Error{}
+}
+
+sequence_append :: proc(sequence: parser.SequenceNode, value: ^parser.YamlNode) -> ^parser.YamlNode {
+	items: [dynamic]^parser.YamlNode
+	for item in sequence.items {
+		append(&items, item)
+	}
+	append(&items, value)
+	return wrap_sequence(items)
+}
+
+wrap_sequence :: proc(items: [dynamic]^parser.YamlNode) -> ^parser.YamlNode {
+	node := new(parser.YamlNode)
+	node^ = parser.YamlNode{.Sequence, parser.SequenceNode{items}}
 	return node
 }
 
