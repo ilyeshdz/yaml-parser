@@ -224,16 +224,7 @@ parse_node :: proc(p: ^Parser) -> (node: ^YamlNode, err: yaml_error.YamlError) {
 	err = parser_expect(p, .Identifier, .String, .Float, .Integer)
 	if err != nil { return }
 
-	scalar_type := scalar_type_from_token(p.previous.kind)
-	if p.previous.kind == .Identifier {
-		switch p.previous.text {
-		case "true", "false":
-			scalar_type = .Boolean
-		case "null", "~":
-			scalar_type = .Null
-		}
-	}
-	node^ = YamlNode{.Scalar, ScalarNode{p.previous.text, scalar_type}, ""}
+	node^ = YamlNode{.Scalar, scalar_from_token(p.previous), ""}
 	return
 }
 
@@ -245,15 +236,106 @@ parse_sequence :: proc(p: ^Parser, seq: ^SequenceNode) -> (err: yaml_error.YamlE
 			return
 		}
 
-		err = parser_expect(p, .Bullet)
-		if err != nil { return }
-
 		item: ^YamlNode
-		item, err = parse_value(p)
+		item, err = parse_bullet(p)
 		if err != nil { return }
 
 		append(&seq.items, item)
 	}
+}
+
+// parse_bullet reads the item a bullet stands for, which is a scalar, or a
+// collection the bullet opens on its own line
+parse_bullet :: proc(p: ^Parser) -> (item: ^YamlNode, err: yaml_error.YamlError) {
+	err = parser_expect(p, .Bullet)
+	if err != nil { return }
+
+	item = new(YamlNode)
+
+	switch {
+	case p.current.kind == .Bullet:
+		// a bullet behind a bullet opens a list inside the list
+		seq := SequenceNode{}
+		err = parse_sequence(p, &seq)
+		if err != nil { return }
+		err = continue_sequence(p, &seq)
+		if err != nil { return }
+		item^ = YamlNode{.Sequence, seq, ""}
+		return
+
+	case is_scalar_kind(p.current.kind):
+		// the token behind the bullet is the item itself unless a colon
+		// follows it, which makes it the first key of a mapping instead
+		first := p.current
+		err = parser_advance(p)
+		if err != nil { return }
+
+		if p.current.kind != .Colon {
+			item^ = YamlNode{.Scalar, scalar_from_token(first), ""}
+			return
+		}
+
+		key := new(YamlNode)
+		key^ = YamlNode{.Scalar, scalar_from_token(first), ""}
+
+		err = parser_advance(p)
+		if err != nil { return }
+
+		value: ^YamlNode
+		value, err = parse_value(p)
+		if err != nil { return }
+
+		mapping := MappingNode{}
+		append(&mapping.pairs, MappingPair{key, value})
+		err = continue_mapping(p, &mapping)
+		if err != nil { return }
+		item^ = YamlNode{.Mapping, mapping, ""}
+		return
+
+	case:
+		// the bullet stands on its own and the item sits on the lines below
+		item, err = parse_value(p)
+		return
+	}
+}
+
+// continue_sequence carries a list a bullet opened onto the lines that are
+// indented under it, which is where the rest of its items are written, and
+// closes it again once those lines run out
+continue_sequence :: proc(p: ^Parser, seq: ^SequenceNode) -> (err: yaml_error.YamlError) {
+	err = skip_newlines(p)
+	if err != nil { return }
+	if p.current.kind != .Indent {
+		return
+	}
+
+	err = parser_advance(p)
+	if err != nil { return }
+
+	err = parse_sequence(p, seq)
+	if err != nil { return }
+
+	err = parser_expect(p, .Dedent)
+	return
+}
+
+// continue_mapping carries a mapping a bullet opened onto the lines that are
+// indented under it, which is where its other keys are written
+continue_mapping :: proc(p: ^Parser, mapping: ^MappingNode) -> (err: yaml_error.YamlError) {
+	err = skip_newlines(p)
+	if err != nil { return }
+	if p.current.kind != .Indent {
+		return
+	}
+
+	err = parser_advance(p)
+	if err != nil { return }
+
+	err = parse_mapping(p, mapping)
+	if err != nil { return }
+
+	err = parser_expect(p, .Dedent)
+	return
 }
 
 
@@ -300,6 +382,25 @@ parser_take_anchor :: proc(p: ^Parser) -> (name: string, err: yaml_error.YamlErr
 	if err != nil { return }
 
 	return
+}
+
+// scalar_from_token types a token the way the file says it, so a word like
+// true or null is not read back as the string it looks like
+scalar_from_token :: proc(tok: lexer_package.Token) -> ScalarNode {
+	scalar_type := scalar_type_from_token(tok.kind)
+	if tok.kind == .Identifier {
+		switch tok.text {
+		case "true", "false":
+			scalar_type = .Boolean
+		case "null", "~":
+			scalar_type = .Null
+		}
+	}
+	return ScalarNode{tok.text, scalar_type}
+}
+
+is_scalar_kind :: proc(kind: lexer_package.Token_Kind) -> bool {
+	return kind == .Identifier || kind == .String || kind == .Integer || kind == .Float
 }
 
 skip_newlines :: proc(p: ^Parser) -> (err: yaml_error.YamlError) {

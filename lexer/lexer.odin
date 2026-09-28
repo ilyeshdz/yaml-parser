@@ -223,6 +223,12 @@ lexer_next_token :: proc(l: ^Lexer) -> (tok: Token, err: yaml_error.YamlError) {
 			tok.kind = .Bullet
 			tok.text = "-"
 			lexer_read_char(l)
+		} else if lexer_peek_ahead(l) == '\n' || lexer_peek_ahead(l) == '\r' || lexer_peek_ahead(l) == 0 {
+			// a bullet with nothing behind it holds a collection written on
+			// the lines below, which is how the emitter lays one out
+			tok.kind = .Bullet
+			tok.text = "-"
+			lexer_read_char(l)
 		} else if lexer_peek_ahead(l) == '-' && lexer_peek_ahead(l, 1) == '-' {
 			if len(l.indent_stack) > 1 {
 				pop(&l.indent_stack)
