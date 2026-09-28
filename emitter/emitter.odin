@@ -1,6 +1,7 @@
 package emitter
 
 import parser "../parser"
+import "core:fmt"
 import "core:strconv"
 import "core:strings"
 
@@ -9,6 +10,16 @@ DEFAULT_INDENT :: "\t"
 Emitter :: struct {
 	builder: strings.Builder,
 	indent:  string,
+	// the name every node already written went out under, which is what turns
+	// the second node sharing a value with the first one into an alias
+	written: map[^parser.YamlNode]string,
+}
+
+// a node is written either as the declaration of an anchor, as an alias
+// pointing back at one, or as itself when no anchor has anything to do with it
+Node_Reference :: struct {
+	text:     string,
+	is_alias: bool,
 }
 
 // Odin has no methods, so every writer procedure takes the emitter first, the
@@ -18,6 +29,16 @@ emit_document :: proc(node: ^parser.YamlNode, indent := DEFAULT_INDENT, allocato
 	e := emitter_init(indent, allocator)
 	// the parser refuses to read a document that does not open with a marker
 	strings.write_string(&e.builder, "---\n")
+
+	// an anchor on the document itself has nothing in front of it, so it goes
+	// on the line under the marker, and the block it names stays as it is
+	if node.anchor != "" {
+		strings.write_string(&e.builder, "&")
+		strings.write_string(&e.builder, node.anchor)
+		strings.write_string(&e.builder, "\n")
+		e.written[node] = node.anchor
+	}
+
 	write_node(&e, node, 0)
 	return strings.to_string(e.builder)
 }
@@ -62,8 +83,26 @@ emitter_init :: proc(indent: string, allocator := context.allocator) -> Emitter 
 	e := Emitter {
 		builder = strings.builder_make_none(allocator),
 		indent  = indent,
+		written = make(map[^parser.YamlNode]string),
 	}
 	return e
+}
+
+// node_reference names a node the first time it is written and hands back the
+// alias that points at it every time after that, since the parser gave every
+// alias the very same node.
+node_reference :: proc(e: ^Emitter, node: ^parser.YamlNode) -> Node_Reference {
+	name, already_written := e.written[node]
+	if already_written {
+		return Node_Reference{fmt.tprintf("*%s", name), true}
+	}
+
+	if node.anchor == "" {
+		return Node_Reference{}
+	}
+
+	e.written[node] = node.anchor
+	return Node_Reference{fmt.tprintf("&%s", node.anchor), false}
 }
 
 write_node :: proc(e: ^Emitter, node: ^parser.YamlNode, depth: int) {
@@ -73,13 +112,13 @@ write_node :: proc(e: ^Emitter, node: ^parser.YamlNode, depth: int) {
 			write_indent(e, depth)
 			write_key(e, pair.key)
 			strings.write_string(&e.builder, ":")
-			write_pair_value(e, pair.value, depth)
+			write_value(e, pair.value, depth)
 		}
 	case parser.SequenceNode:
 		for item in v.items {
 			write_indent(e, depth)
 			strings.write_string(&e.builder, "-")
-			write_item_value(e, item, depth)
+			write_value(e, item, depth)
 		}
 	case parser.ScalarNode:
 		write_indent(e, depth)
@@ -88,25 +127,37 @@ write_node :: proc(e: ^Emitter, node: ^parser.YamlNode, depth: int) {
 	}
 }
 
-write_pair_value :: proc(e: ^Emitter, value: ^parser.YamlNode, depth: int) {
+// write_value writes what follows a colon or a bullet. An anchor sits in front
+// of the value it names, and a block it names goes on the lines below it, while
+// an alias stands on its own because it already is the whole value.
+write_value :: proc(e: ^Emitter, value: ^parser.YamlNode, depth: int) {
+	reference := node_reference(e, value)
+
 	switch v in value.value {
 	case parser.MappingNode, parser.SequenceNode:
-		strings.write_string(&e.builder, "\n")
-		write_node(e, value, depth + 1)
-	case parser.ScalarNode:
 		strings.write_string(&e.builder, " ")
-		write_scalar(e, v)
+		if reference.text == "" {
+			strings.write_string(&e.builder, "\n")
+			write_node(e, value, depth + 1)
+			return
+		}
+		strings.write_string(&e.builder, reference.text)
 		strings.write_string(&e.builder, "\n")
-	}
-}
+		if !reference.is_alias {
+			write_node(e, value, depth + 1)
+		}
 
-write_item_value :: proc(e: ^Emitter, item: ^parser.YamlNode, depth: int) {
-	switch v in item.value {
-	case parser.MappingNode, parser.SequenceNode:
-		strings.write_string(&e.builder, "\n")
-		write_node(e, item, depth + 1)
 	case parser.ScalarNode:
 		strings.write_string(&e.builder, " ")
+		if reference.is_alias {
+			strings.write_string(&e.builder, reference.text)
+			strings.write_string(&e.builder, "\n")
+			return
+		}
+		if reference.text != "" {
+			strings.write_string(&e.builder, reference.text)
+			strings.write_string(&e.builder, " ")
+		}
 		write_scalar(e, v)
 		strings.write_string(&e.builder, "\n")
 	}

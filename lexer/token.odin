@@ -16,6 +16,8 @@ Token_Kind :: enum {
 	StreamStart,
 	StreamEnd,
 	Hyphen,
+	Anchor,
+	Alias,
 	Newline,
 	Identifier,
 	String,

@@ -13,6 +13,9 @@ YamlNode :: struct {
 		SequenceNode,
 		MappingNode,
 	},
+	// the name an anchor gave this node, empty when nothing anchors it. Every
+	// alias pointing at that name ends up holding this very node
+	anchor: string,
 }
 
 ScalarType :: enum {

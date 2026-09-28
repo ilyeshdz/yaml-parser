@@ -77,7 +77,7 @@ lexer_lex_number :: proc(l: ^Lexer) -> (tok: Token, err: yaml_error.YamlError) {
 	tok.col = l.col
 	start := l.position
 	is_float := false
-	for l.ch != ' ' && l.ch != ':' && l.ch != '\n' && l.ch != '\r' && l.ch != '\t' {
+	for l.ch != ' ' && l.ch != ':' && l.ch != '\n' && l.ch != '\r' && l.ch != '\t' && l.ch != 0 {
 		if (l.ch == '.' || l.ch == 'e' || l.ch == 'E') && !is_float {
 			is_float = true
 		}
@@ -100,6 +100,36 @@ lexer_lex_number :: proc(l: ^Lexer) -> (tok: Token, err: yaml_error.YamlError) {
 			col     = tok.col,
 		}
 	}
+	return
+}
+
+// an anchor or an alias is a sigil followed by a name that runs to the next
+// space, a colon or the end of the line, so that a trailing comment or the
+// next key does not get swallowed by the name
+lexer_lex_name :: proc(l: ^Lexer, kind: Token_Kind) -> (tok: Token, err: yaml_error.YamlError) {
+	sigil := "&" if kind == .Anchor else "*"
+
+	tok.kind = kind
+	tok.line = l.line
+	tok.col = l.col
+	lexer_read_char(l)
+
+	start := l.position
+	for l.ch != ' ' && l.ch != ':' && l.ch != '\n' && l.ch != '\r' && l.ch != '\t' &&
+	    l.ch != ',' && l.ch != '#' && l.ch != 0 {
+		lexer_read_char(l)
+	}
+	tok.text = l.input[start:l.position]
+
+	if tok.text == "" {
+		err = yaml_error.LexerError{
+			kind    = .UnexpectedCharacter,
+			message = fmt.tprintf("%q has to be followed by an anchor name", sigil),
+			line    = tok.line,
+			col     = tok.col,
+		}
+	}
+
 	return
 }
 
@@ -215,6 +245,13 @@ lexer_next_token :: proc(l: ^Lexer) -> (tok: Token, err: yaml_error.YamlError) {
 			lexer_read_char(l)
 		}
 
+	case '&':
+		tok, err = lexer_lex_name(l, .Anchor)
+		return
+	case '*':
+		tok, err = lexer_lex_name(l, .Alias)
+		return
+
 	case '\n', '\r':
 		tok.kind = .Newline
 		tok.text = "\n"
@@ -298,7 +335,7 @@ lexer_next_token :: proc(l: ^Lexer) -> (tok: Token, err: yaml_error.YamlError) {
 	case:
 		start := l.position
 		tok.kind = .Identifier
-		for l.ch != ' ' && l.ch != ':' && l.ch != '\n' && l.ch != '\r' && l.ch != '\t' {
+		for l.ch != ' ' && l.ch != ':' && l.ch != '\n' && l.ch != '\r' && l.ch != '\t' && l.ch != 0 {
 			lexer_read_char(l)
 		}
 		tok.text = l.input[start:l.position]

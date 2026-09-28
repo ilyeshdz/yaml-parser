@@ -18,6 +18,9 @@ ParserErrorKind :: enum {
 	ExpectedToken,
 	MissingValue,
 	InvalidIndentation,
+	UnknownAnchor,
+	DuplicateAnchor,
+	RecursiveAlias,
 }
 
 ParserError :: struct {

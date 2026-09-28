@@ -8,9 +8,9 @@ And no, I initially thought it was a great idea to match what the specification 
 
 Also, reading the YAML spec was... an experience. Did you know YAML technically supports JSON as a subset? Yeah, I'm not gonna bother with that. Full spec compliance is completely out of scope, the spec is 70 pages of pure chaos and I will never use all of it anyway.
 
-The lexer handles identifiers, quoted strings, integers, floats, indentation, stream markers, bullets, and colons. The parser is a recursive descent parser that handles flat and nested block mappings, block sequences, and typed scalar values (string, integer, float) with proper error propagation. The emitter goes the other way and writes a parsed document back out as YAML, which is what makes editing a value in a file possible.
+The lexer handles identifiers, quoted strings, integers, floats, indentation, stream markers, bullets, colons, and anchors and aliases. The parser is a recursive descent parser that handles flat and nested block mappings, block sequences, and typed scalar values (string, integer, float) with proper error propagation. The emitter goes the other way and writes a parsed document back out as YAML, which is what makes editing a value in a file possible.
 
-I think that's pretty much it for the core of it. Sure, there are things I could add like flow sequences or anchors, but honestly this does what I need it to do. Might add more stuff later, might not. We'll see.
+I think that's pretty much it for the core of it. Sure, there are things I could add like flow sequences, but honestly this does what I need it to do. Might add more stuff later, might not. We'll see.
 
 ## Usage
 
@@ -66,6 +66,31 @@ name: next-version
 A numeric path segment edits a list, so `set config.yaml sequence_key.1 item9` replaces the second item and `add config.yaml sequence_key.0 first` puts a new item in front of it. Adding at the length of the list appends to it, and adding to a key that is a list without an index appends as well, which is what the last example above does. Only items that are already in the list can be set, so an index past the end is an error.
 
 The catch is that the document gets written back out from the parsed tree, so comments, blank lines, quote style, and the exact spacing of the original are gone. That is the price of not keeping the source around, and `--dry-run` is there so you can see the result before it lands. The parser only reads lists of plain values for now, so a list of lists or a list of mappings cannot be written yet, even though the editing side is ready for it.
+
+## Anchors and aliases
+
+An anchor gives a value a name, and an alias reads that value back, so a block that shows up in several places only has to be written once:
+
+```yaml
+---
+defaults: &defaults
+	flag: true
+	ratio: 2.5
+production: *defaults
+staging: *defaults
+```
+
+`get` walks right through an alias, so `yaml-parser get config.yaml staging.ratio` is `2.5`. An alias to a scalar works the same way, and so does one inside a sequence. Since the emitter knows which nodes go out more than once, `set` and `add` write anchors and aliases back out instead of spelling the same block out twice, so a file that shares values keeps sharing them after an edit. Editing a key an alias points at takes the alias apart, on the grounds that the edited value is no longer the value the anchor named.
+
+An anchor name can only be used once, an alias has to name an anchor defined above it, and an alias cannot point at the node it lives in, which is why a tree here never holds itself:
+
+```yaml
+--- &root        # parser error, *root is a node that contains itself
+name: yaml-parser
+mirror: *root
+```
+
+Merge keys (`<<: *defaults`) are not supported and say so instead of quietly doing nothing.
 
 Hope you find this project at least a little bit useful and interesting :)))
 

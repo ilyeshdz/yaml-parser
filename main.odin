@@ -49,6 +49,10 @@ parent_key:
 		flag: true
 		ratio: 2.5
 	score: 0
+anchored: &shared
+	flag: true
+	ratio: 2.5
+alias_of_anchored: *shared
 sequence_key:
 	- item1
 	- item2
@@ -137,6 +141,9 @@ Key paths are dot separated, and a numeric segment indexes a sequence:
 
   yaml-parser get config.yaml parent_key.child_key.test_it_out
   yaml-parser get config.yaml sequence_key.1
+
+An anchor &name names a value and an alias *name reads that same value, so get
+walks through an alias without caring that it is one.
 
 set and add write the whole file back out, which means comments and the
 original spacing are not kept. Pass --dry-run to see the result first. The
@@ -329,13 +336,13 @@ mapping_pair_index :: proc(mapping: parser.MappingNode, segment: string) -> int 
 
 new_pair :: proc(segment: string, value: ^parser.YamlNode) -> parser.MappingPair {
 	key := new(parser.YamlNode)
-	key^ = parser.YamlNode{.Scalar, parser.ScalarNode{segment, .String}}
+	key^ = parser.YamlNode{.Scalar, parser.ScalarNode{segment, .String}, ""}
 	return parser.MappingPair{key, value}
 }
 
 wrap_mapping :: proc(pairs: [dynamic]parser.MappingPair) -> ^parser.YamlNode {
 	node := new(parser.YamlNode)
-	node^ = parser.YamlNode{.Mapping, parser.MappingNode{pairs}}
+	node^ = parser.YamlNode{.Mapping, parser.MappingNode{pairs}, ""}
 	return node
 }
 
@@ -421,7 +428,7 @@ sequence_append :: proc(sequence: parser.SequenceNode, value: ^parser.YamlNode) 
 
 wrap_sequence :: proc(items: [dynamic]^parser.YamlNode) -> ^parser.YamlNode {
 	node := new(parser.YamlNode)
-	node^ = parser.YamlNode{.Sequence, parser.SequenceNode{items}}
+	node^ = parser.YamlNode{.Sequence, parser.SequenceNode{items}, ""}
 	return node
 }
 
@@ -448,7 +455,7 @@ scalar_from_text :: proc(text: string) -> parser.ScalarNode {
 
 scalar_node :: proc(text: string) -> ^parser.YamlNode {
 	node := new(parser.YamlNode)
-	node^ = parser.YamlNode{.Scalar, scalar_from_text(text)}
+	node^ = parser.YamlNode{.Scalar, scalar_from_text(text), ""}
 	return node
 }
 
@@ -686,6 +693,30 @@ main :: proc() {
 }
 
 print_yaml_node :: proc(node: ^parser.YamlNode, depth: int = 0) {
+	written := make(map[^parser.YamlNode]bool)
+	print_yaml_node_written(node, depth, &written)
+}
+
+// the dump says the same thing the emitter writes: the first time an anchored
+// node shows up it is printed under its anchor, and a node that is the very
+// same one a second time is printed as an alias
+print_yaml_node_written :: proc(node: ^parser.YamlNode, depth: int, written: ^map[^parser.YamlNode]bool) {
+    if written[node] {
+        for _ in 0 ..< depth {
+            fmt.print("  ")
+        }
+        fmt.printf("*%s\n", node.anchor)
+        return
+    }
+    written[node] = true
+
+    if node.anchor != "" {
+        for _ in 0 ..< depth {
+            fmt.print("  ")
+        }
+        fmt.printf("&%s\n", node.anchor)
+    }
+
     switch v in node.value {
     case parser.ScalarNode:
         for _ in 0 ..< depth {
@@ -702,7 +733,7 @@ print_yaml_node :: proc(node: ^parser.YamlNode, depth: int = 0) {
             } else {
                 fmt.printf("<complex key>:\n")
             }
-            print_yaml_node(pair.value, depth + 1)
+            print_yaml_node_written(pair.value, depth + 1, written)
         }
     case parser.SequenceNode:
         for item in v.items {
@@ -713,7 +744,7 @@ print_yaml_node :: proc(node: ^parser.YamlNode, depth: int = 0) {
                 fmt.printf("- %s\n", item.value.(parser.ScalarNode).value)
             } else {
                 fmt.println("-")
-                print_yaml_node(item, depth + 1)
+                print_yaml_node_written(item, depth + 1, written)
             }
         }
     }
