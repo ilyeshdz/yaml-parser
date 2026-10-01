@@ -22,5 +22,6 @@ Token_Kind :: enum {
 	Identifier,
 	String,
 	Integer,
-	Float
+	Float,
+	Timestamp
 }

@@ -8,7 +8,7 @@ And no, I initially thought it was a great idea to match what the specification 
 
 Also, reading the YAML spec was... an experience. Did you know YAML technically supports JSON as a subset? Yeah, I'm not gonna bother with that. Full spec compliance is completely out of scope, the spec is 70 pages of pure chaos and I will never use all of it anyway.
 
-The lexer handles identifiers, quoted strings, integers, floats, indentation, the markers that open and close a document, bullets, colons, and anchors and aliases. The parser is a recursive descent parser that walks every document of a stream and handles flat and nested block mappings, block sequences, and typed scalar values (string, integer, float) with proper error propagation. The emitter goes the other way and writes a parsed stream back out as YAML, which is what makes editing a value in a file possible.
+The lexer handles identifiers, quoted strings, integers, floats, dates, indentation, the markers that open and close a document, bullets, colons, and anchors and aliases. The parser is a recursive descent parser that walks every document of a stream and handles flat and nested block mappings, block sequences, and typed scalar values (string, integer, float, timestamp) with proper error propagation. The emitter goes the other way and writes a parsed stream back out as YAML, which is what makes editing a value in a file possible.
 
 I think that's pretty much it for the core of it. Sure, there are things I could add like flow sequences, but honestly this does what I need it to do. Might add more stuff later, might not. We'll see.
 
@@ -99,7 +99,7 @@ name: next-version
 ...
 ```
 
-`add` makes the mappings the path needs on its way down, and complains if the key is already there, while `set` only replaces what is already in the file. The value is typed the way the parser would type it, so `1.5` comes back as a float, `true` as a boolean, and anything with a space in it gets quoted for you. There is no way to ask for a string, so `42` is always the integer 42.
+`add` makes the mappings the path needs on its way down, and complains if the key is already there, while `set` only replaces what is already in the file. The value is typed the way the parser would type it, so `1.5` comes back as a float, `true` as a boolean, `2026-10-01` as a timestamp, and anything with a space in it gets quoted for you. There is no way to ask for a string, so `42` is always the integer 42.
 
 A numeric path segment edits a list, so `set config.yaml sequence_key.1 item9` replaces the second item and `add config.yaml sequence_key.0 first` puts a new item in front of it. Adding at the length of the list appends to it, and adding to a key that is a list without an index appends as well, which is what the last example above does. Only items that are already in the list can be set, so an index past the end is an error.
 
@@ -114,6 +114,19 @@ name: next-version   # parser error, "name" is already defined above
 ```
 
 The same key showing up in two documents of a stream, or in two items of a list, is a different mapping every time, so that stays fine.
+
+## Dates
+
+A date used to be a number the lexer tripped over, and it is now read as what it is:
+
+```sh
+$ yaml-parser get dates.yaml shipped_on -t
+timestamp
+$ yaml-parser get dates.yaml shipped_on
+2026-10-01
+```
+
+The time behind a date is written the way YAML spells one, so `2001-12-14t21:59:43.10-05:00`, `2001-12-14T21:59:43Z` and `2001-12-14 21:59:43.10 -5` all come back out of `get` as the single value they are. A date sitting in quotes is a string like any other, and a date naming a thirteenth month is said to be wrong instead of being read as one.
 
 ## Anchors and aliases
 

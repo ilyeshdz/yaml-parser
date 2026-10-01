@@ -161,8 +161,8 @@ edit is lost:
 
 set and add write the whole file back out, which means comments and the
 original spacing are not kept. Pass --dry-run to see the result first. The
-value is typed the way the parser would type it, so 1.5 is a float and true is
-a boolean.
+value is typed the way the parser would type it, so 1.5 is a float, true is a
+boolean and 2026-10-01 is a timestamp.
 
 A numeric path segment edits a list item, where set replaces the item and add
 puts the value in front of it, so adding at the length of the list appends to
@@ -446,6 +446,10 @@ scalar_from_text :: proc(text: string) -> parser.ScalarNode {
 		return parser.ScalarNode{text, .Null}
 	}
 
+	if lexer.is_timestamp(text) {
+		return parser.ScalarNode{text, .Timestamp}
+	}
+
 	if is_number(text) {
 		kind := parser.ScalarType.Integer
 		if is_float_text(text) {
@@ -522,6 +526,8 @@ print_scalar_type :: proc(node: ^parser.YamlNode) {
 		fmt.println("boolean")
 	case .Null:
 		fmt.println("null")
+	case .Timestamp:
+		fmt.println("timestamp")
 	}
 }
 

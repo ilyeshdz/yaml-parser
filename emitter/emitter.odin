@@ -199,6 +199,13 @@ write_key :: proc(e: ^Emitter, key: ^parser.YamlNode) {
 		return
 	}
 
+	// a timestamp goes out the way the file spelled it, quoting it would read
+	// it back as the string it looks like instead of a date
+	if scalar.type == .Timestamp {
+		strings.write_string(&e.builder, scalar.value)
+		return
+	}
+
 	if is_plain(scalar.value) {
 		strings.write_string(&e.builder, scalar.value)
 		return

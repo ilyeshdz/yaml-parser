@@ -24,6 +24,9 @@ ScalarType :: enum {
 	Float,
 	Boolean,
 	Null,
+	// a date, or a date with the time and the offset behind it, written the
+	// way YAML spells one
+	Timestamp,
 }
 
 ScalarNode :: struct {

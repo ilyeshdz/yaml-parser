@@ -131,7 +131,7 @@ parse_mapping :: proc(p: ^Parser, mapping: ^MappingNode) -> (err: yaml_error.Yam
 			return
 		}
 
-		err = parser_expect(p, .Identifier, .String, .Integer, .Float)
+		err = parser_expect(p, .Identifier, .String, .Integer, .Float, .Timestamp)
 		if err != nil { return }
 		key := new(YamlNode)
 		key^ = YamlNode{.Scalar, ScalarNode{p.previous.text, scalar_type_from_token(p.previous.kind)}, ""}
@@ -268,7 +268,7 @@ parse_node :: proc(p: ^Parser) -> (node: ^YamlNode, err: yaml_error.YamlError) {
 		return
 	}
 
-	err = parser_expect(p, .Identifier, .String, .Float, .Integer)
+	err = parser_expect(p, .Identifier, .String, .Float, .Integer, .Timestamp)
 	if err != nil { return }
 
 	node^ = YamlNode{.Scalar, scalar_from_token(p.previous), ""}
@@ -394,6 +394,8 @@ scalar_type_from_token :: proc(kind: lexer_package.Token_Kind) -> ScalarType {
 		return .Integer
 	case .Float:
 		return .Float
+	case .Timestamp:
+		return .Timestamp
 	case:
 		return .String
 	}
@@ -447,7 +449,8 @@ scalar_from_token :: proc(tok: lexer_package.Token) -> ScalarNode {
 }
 
 is_scalar_kind :: proc(kind: lexer_package.Token_Kind) -> bool {
-	return kind == .Identifier || kind == .String || kind == .Integer || kind == .Float
+	return kind == .Identifier || kind == .String || kind == .Integer ||
+	       kind == .Float || kind == .Timestamp
 }
 
 skip_newlines :: proc(p: ^Parser) -> (err: yaml_error.YamlError) {
