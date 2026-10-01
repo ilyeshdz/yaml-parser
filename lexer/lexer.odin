@@ -47,6 +47,27 @@ lexer_peek_ahead :: proc(l: ^Lexer, offset: int = 0) -> rune {
 	return cast(rune)l.input[l.read_position + offset]
 }
 
+// lexer_end_of_input closes whatever blocks are still open, then closes the
+// document a --- opened, and only after both ends the token stream, so that
+// the parser sees the end of the last document instead of a bare Eof
+lexer_end_of_input :: proc(l: ^Lexer, tok: ^Token) {
+	if len(l.indent_stack) > 1 {
+		pop(&l.indent_stack)
+		tok.kind = .Dedent
+		tok.text = "dedent"
+		return
+	}
+
+	if l.within_stream {
+		l.within_stream = false
+		tok.kind = .StreamEnd
+		tok.text = "..."
+		return
+	}
+
+	tok.kind = .Eof
+}
+
 // consumes a comment starting at '#', up to and including the end of the line
 lexer_skip_comment :: proc(l: ^Lexer) {
 	for l.ch != '\n' && l.ch != '\r' && l.ch != 0 {
@@ -191,13 +212,7 @@ lexer_next_token :: proc(l: ^Lexer) -> (tok: Token, err: yaml_error.YamlError) {
 	if l.ch == '#' {
 		lexer_skip_comment(l)
 		if l.ch == 0 {
-			if len(l.indent_stack) > 1 {
-				pop(&l.indent_stack)
-				tok.kind = .Dedent
-				tok.text = "dedent"
-				return
-			}
-			tok.kind = .Eof
+			lexer_end_of_input(l, &tok)
 			return
 		}
 		tok.kind = .Newline
@@ -205,15 +220,21 @@ lexer_next_token :: proc(l: ^Lexer) -> (tok: Token, err: yaml_error.YamlError) {
 		return
 	}
 
+	// three dots end the document the last --- opened, which is what lets a
+	// stream carry more than one of them
+	if l.ch == '.' && lexer_peek_ahead(l) == '.' && lexer_peek_ahead(l, 1) == '.' {
+		l.within_stream = false
+		tok.kind = .StreamEnd
+		tok.text = "..."
+		lexer_read_char(l)
+		lexer_read_char(l)
+		lexer_read_char(l)
+		return
+	}
+
 	switch l.ch {
 	case 0:
-		if len(l.indent_stack) > 1 {
-			pop(&l.indent_stack)
-			tok.kind = .Dedent
-			tok.text = "dedent"
-			return
-		}
-		tok.kind = .Eof
+		lexer_end_of_input(l, &tok)
 	case ':':
 		tok.kind = .Colon
 		tok.text = ":"
@@ -236,8 +257,10 @@ lexer_next_token :: proc(l: ^Lexer) -> (tok: Token, err: yaml_error.YamlError) {
 				tok.text = "dedent"
 				return
 			}
-			tok.kind = .StreamStart if !l.within_stream else .StreamEnd
-			l.within_stream = !l.within_stream
+			// every --- opens a document, so a marker standing between two of
+			// them starts the one behind it instead of closing the stream
+			tok.kind = .StreamStart
+			l.within_stream = true
 			tok.text = "---"
 			for x := 0; x < 3; x += 1 {
 				lexer_read_char(l)

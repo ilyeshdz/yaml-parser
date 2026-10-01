@@ -8,7 +8,7 @@ And no, I initially thought it was a great idea to match what the specification 
 
 Also, reading the YAML spec was... an experience. Did you know YAML technically supports JSON as a subset? Yeah, I'm not gonna bother with that. Full spec compliance is completely out of scope, the spec is 70 pages of pure chaos and I will never use all of it anyway.
 
-The lexer handles identifiers, quoted strings, integers, floats, indentation, stream markers, bullets, colons, and anchors and aliases. The parser is a recursive descent parser that handles flat and nested block mappings, block sequences, and typed scalar values (string, integer, float) with proper error propagation. The emitter goes the other way and writes a parsed document back out as YAML, which is what makes editing a value in a file possible.
+The lexer handles identifiers, quoted strings, integers, floats, indentation, the markers that open and close a document, bullets, colons, and anchors and aliases. The parser is a recursive descent parser that walks every document of a stream and handles flat and nested block mappings, block sequences, and typed scalar values (string, integer, float) with proper error propagation. The emitter goes the other way and writes a parsed stream back out as YAML, which is what makes editing a value in a file possible.
 
 I think that's pretty much it for the core of it. Sure, there are things I could add like flow sequences, but honestly this does what I need it to do. Might add more stuff later, might not. We'll see.
 
@@ -21,6 +21,7 @@ yaml-parser get <file> <key.path>      print the value found at <key.path>
 yaml-parser get <file> <key.path> -t   print the type of that value instead
 yaml-parser set <file> <key.path> <value>  replace the value at <key.path>
 yaml-parser add <file> <key.path> <value>  add a new key at <key.path>
+yaml-parser get <file> <key.path> --doc 1  work on the second document
 yaml-parser help                       print the usage text
 ```
 
@@ -39,6 +40,43 @@ $ VERSION=$(yaml-parser get config.yaml version)
 ```
 
 If the key path points at a mapping or a sequence, the whole subtree is printed instead of a single value. Everything the parser cannot resolve (missing key, bad index, path going into a scalar) goes to stderr and exits with 3, a broken file exits with 1, a wrong command exits with 2, and a file that cannot be written exits with 4.
+
+## More than one document in a file
+
+A file can hold a stream of documents, each one opened by a `---` of its own and closed either by the marker opening the next one or by a `...`:
+
+```yaml
+---
+name: production
+replicas: 3
+---
+name: staging
+replicas: 1
+...
+```
+
+`dump` prints every document of the stream, with a blank line telling them apart, and `get`, `set` and `add` work on the first one unless `--doc <n>` picks another, where the first document is 0:
+
+```sh
+$ yaml-parser dump envs.yaml
+name:
+  production
+replicas:
+  3
+
+name:
+  staging
+replicas:
+  1
+$ yaml-parser get envs.yaml name --doc 1
+staging
+$ yaml-parser set envs.yaml replicas 4 --doc 0
+4
+```
+
+An anchor name belongs to the document that gave it, so the same name can show up again in the next one, and an alias cannot reach across the marker into the document above it.
+
+`set` and `add` write the whole stream back out, so editing one document keeps the ones behind it in the file instead of dropping them.
 
 `set` and `add` edit the file instead of just reading from it:
 

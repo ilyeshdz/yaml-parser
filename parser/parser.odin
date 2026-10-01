@@ -30,46 +30,79 @@ parser_init :: proc(lexer: ^lexer_package.Lexer) -> (Parser, yaml_error.YamlErro
 	return p, nil
 }
 
+// parser_parse reads every document of a stream, which is what a file holding
+// more than one --- marker is made of. Each document gets its own anchors,
+// because a name one document gives is not seen by the ones behind it.
 parser_parse :: proc(p: ^Parser, allocator := context.allocator) -> (document: YamlDocument, err: yaml_error.YamlError) {
 	context.allocator = allocator
 
-	root := new(MappingNode)
+	for {
+		err = skip_newlines(p)
+		if err != nil { return }
 
-	// the root node exists before it is filled in so that an anchor on the
-	// document itself can be registered while the mapping is still being read,
-	// an alias below it needs to find that anchor first
-	root_node := new(YamlNode)
-	p.open_node = root_node
+		if p.current.kind == .Eof {
+			return
+		}
 
-	err = skip_newlines(p)
-	if err != nil { return }
+		// the marker behind a document closes it, and the document behind the
+		// closing marker has a --- of its own waiting
+		if p.current.kind == .StreamEnd {
+			err = parser_advance(p)
+			if err != nil { return }
+			continue
+		}
 
-	err = parser_expect(p, .StreamStart)
-	if err != nil { return }
+		// a file that does not open with a marker is not a stream this parser
+		// knows how to read
+		if p.current.kind != .StreamStart {
+			err = yaml_error.ParserError {
+				kind    = .UnexpectedToken,
+				message = fmt.tprintf("a document has to open with ---, got %s", p.current.kind),
+				line    = p.current.line,
+				col     = p.current.col,
+			}
+			return
+		}
 
-	root_anchor: string
-	root_anchor, err = parser_take_anchor(p)
-	if err != nil { return }
-	if root_anchor != "" {
-		p.anchors[root_anchor] = root_node
+		err = parser_advance(p)
+		if err != nil { return }
+
+		clear(&p.anchors)
+
+		root := new(MappingNode)
+
+		// the node exists before it is filled in so that an anchor on the
+		// document itself can be registered while the mapping is still being
+		// read, an alias below it needs to find that anchor first
+		root_node := new(YamlNode)
+		p.open_node = root_node
+
+		root_anchor: string
+		root_anchor, err = parser_take_anchor(p)
+		if err != nil { return }
+		if root_anchor != "" {
+			p.anchors[root_anchor] = root_node
+		}
+
+		err = parse_mapping(p, root)
+		if err != nil { return }
+
+		// the node wraps the mapping only once every pair has been appended,
+		// so the copy of the pair slice sees the final length
+		root_node^ = YamlNode{.Mapping, root^, root_anchor}
+		p.open_node = nil
+		append(&document.documents, root_node)
 	}
-
-	err = parse_mapping(p, root)
-	if err != nil { return }
-
-	// the node wraps the mapping only once every pair has been appended, so the
-	// copy of the pair slice sees the final length
-	root_node^ = YamlNode{.Mapping, root^, root_anchor}
-	p.open_node = nil
-	document = YamlDocument{root_node}
-	return
 }
 
 parse_mapping :: proc(p: ^Parser, mapping: ^MappingNode) -> (err: yaml_error.YamlError) {
 	for {
 		err = skip_newlines(p)
 		if err != nil { return }
-		if p.current.kind == .Dedent || p.current.kind == .Eof || p.current.kind == .StreamEnd {
+		// a marker of any kind ends the mapping it stands in front of, so the
+		// parser comes back here for the document behind it
+		if p.current.kind == .Dedent || p.current.kind == .Eof ||
+		   p.current.kind == .StreamEnd || p.current.kind == .StreamStart {
 			return
 		}
 
@@ -216,7 +249,9 @@ parse_node :: proc(p: ^Parser) -> (node: ^YamlNode, err: yaml_error.YamlError) {
 	}
 
 	// an empty value means null
-	if p.current.kind == .Dedent || p.current.kind == .Eof || p.current.kind == .StreamEnd || p.previous.kind == .Newline {
+	if p.current.kind == .Dedent || p.current.kind == .Eof ||
+	   p.current.kind == .StreamEnd || p.current.kind == .StreamStart ||
+	   p.previous.kind == .Newline {
 		node^ = YamlNode{.Scalar, ScalarNode{"", .Null}, ""}
 		return
 	}

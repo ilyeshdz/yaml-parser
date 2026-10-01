@@ -58,7 +58,7 @@ sequence_key:
 	- item2
 	- item3
 # comment before the stream end
----`
+...`
 
 print_error :: proc(err: yaml_error.YamlError) {
 	switch e in err {
@@ -84,12 +84,16 @@ Lookup_Error_Kind :: enum {
 	Not_A_Mapping,
 	Not_An_Index,
 	Index_Out_Of_Range,
+	Document_Out_Of_Range,
 }
 
 Lookup_Error :: struct {
 	kind:      Lookup_Error_Kind,
 	segment:   string,
 	index:     int,
+	// how many documents the stream holds, which is what puts a bound on the
+	// number --doc can ask for
+	count:     int,
 	node_kind: parser.YamlNodeKind,
 }
 
@@ -122,6 +126,8 @@ print_lookup_error :: proc(err: Lookup_Error, path: string) {
 		fmt.eprintf("Error: '%s' holds a sequence, so '%s' has to be an index\n", err.segment, err.segment)
 	case .Index_Out_Of_Range:
 		fmt.eprintf("Error: index %d is out of range for the sequence at '%s'\n", err.index, err.segment)
+	case .Document_Out_Of_Range:
+		fmt.eprintf("Error: the stream holds %d documents, so document %d cannot be picked\n", err.count, err.index)
 	}
 }
 
@@ -144,6 +150,14 @@ Key paths are dot separated, and a numeric segment indexes a sequence:
 
 An anchor &name names a value and an alias *name reads that same value, so get
 walks through an alias without caring that it is one.
+
+A file can hold more than one document, each one behind a --- marker of its
+own, and dump prints every one of them. get, set and add work on the first
+document unless --doc <n> asks for another one, where the first document is 0,
+and set and add write all of them back out so nothing behind the document they
+edit is lost:
+
+  yaml-parser get config.yaml release.1 --doc 1
 
 set and add write the whole file back out, which means comments and the
 original spacing are not kept. Pass --dry-run to see the result first. The
@@ -538,27 +552,91 @@ run_dump :: proc(filename: string, allocator := context.allocator) -> int {
 		return EXIT_PARSE_ERROR
 	}
 
-	print_yaml_node(document.root, 0)
+	// a stream holding more than one document is printed whole, and the
+	// documents are told apart by a blank line
+	for node, index in document.documents {
+		if index > 0 {
+			fmt.println()
+		}
+		print_yaml_node(node, 0)
+	}
 	return EXIT_OK
+}
+
+// Flag_Options says which options a command takes, so that the ones belonging
+// to another command can be turned down
+Flag_Options :: struct {
+	allow_type:    bool,
+	allow_dry_run: bool,
+}
+
+// Flag_Values is what the options behind the positional arguments asked for
+Flag_Values :: struct {
+	show_type: bool,
+	dry_run:   bool,
+	// the document of the stream the command works on, 0 being the first one
+	document:  int,
+}
+
+// parse_flags reads the options trailing the positional arguments of get, set
+// and add, and hands back a message when something given is not one of them
+parse_flags :: proc(args: []string, name: string, options: Flag_Options) -> (flags: Flag_Values, message: string) {
+	i := 0
+	for i < len(args) {
+		switch args[i] {
+		case "-t", "--type":
+			if !options.allow_type {
+				return Flag_Values{}, fmt.tprintf("unknown option '%s' for %s", args[i], name)
+			}
+			flags.show_type = true
+		case "--dry-run":
+			if !options.allow_dry_run {
+				return Flag_Values{}, fmt.tprintf("unknown option '%s' for %s", args[i], name)
+			}
+			flags.dry_run = true
+		case "--doc":
+			if i + 1 >= len(args) {
+				return Flag_Values{}, "--doc needs a document number"
+			}
+			number, parsed := strconv.parse_int(args[i + 1], 10)
+			if !parsed || number < 0 {
+				return Flag_Values{}, fmt.tprintf("%s is not a document number", args[i + 1])
+			}
+			flags.document = number
+			i += 1
+		case:
+			return Flag_Values{}, fmt.tprintf("unknown option '%s' for %s", args[i], name)
+		}
+		i += 1
+	}
+	return flags, ""
+}
+
+// pick_document hands back the document the flags asked for, or the error that
+// says the stream does not hold that many
+pick_document :: proc(document: parser.YamlDocument, flags: Flag_Values) -> (node: ^parser.YamlNode, err: Lookup_Error) {
+	node = parser.document_at(document, flags.document)
+	if node == nil {
+		return nil, Lookup_Error {
+			kind  = .Document_Out_Of_Range,
+			index = flags.document,
+			count = len(document.documents),
+		}
+	}
+	return node, Lookup_Error{}
 }
 
 run_get :: proc(args: []string, allocator := context.allocator) -> int {
 	if len(args) < 2 {
 		return report_usage_error("get takes a file and a key path")
 	}
-	if len(args) > 3 {
-		return report_usage_error("get takes a file, a key path and an optional -t")
-	}
 
 	filename := args[0]
 	path := args[1]
 
-	show_type := false
-	if len(args) == 3 {
-		if args[2] != "-t" && args[2] != "--type" {
-			return report_usage_error(fmt.tprintf("unknown option '%s' for get", args[2]))
-		}
-		show_type = true
+	flags, flag_message := parse_flags(args[2:], "get", Flag_Options{allow_type = true})
+	if flag_message != "" {
+		return report_usage_error(flag_message)
 	}
 
 	document, err := load_document(filename, allocator)
@@ -567,13 +645,20 @@ run_get :: proc(args: []string, allocator := context.allocator) -> int {
 		return EXIT_PARSE_ERROR
 	}
 
-	node, lookup_err := node_lookup(document.root, path)
+	root, lookup_err := pick_document(document, flags)
 	if lookup_err.kind != .None {
 		print_lookup_error(lookup_err, path)
 		return EXIT_LOOKUP_ERROR
 	}
 
-	if show_type {
+	node: ^parser.YamlNode
+	node, lookup_err = node_lookup(root, path)
+	if lookup_err.kind != .None {
+		print_lookup_error(lookup_err, path)
+		return EXIT_LOOKUP_ERROR
+	}
+
+	if flags.show_type {
 		if node.kind != .Scalar {
 			fmt.eprintf("Error: '%s' is a %v, so it has no scalar type\n", path, node.kind)
 			return EXIT_USAGE_ERROR
@@ -592,20 +677,14 @@ run_edit :: proc(args: []string, mode: Edit_Mode, allocator := context.allocator
 	if len(args) < 3 {
 		return report_usage_error(fmt.tprintf("%s takes a file, a key path and a value", name))
 	}
-	if len(args) > 4 {
-		return report_usage_error(fmt.tprintf("%s takes a file, a key path, a value and an optional --dry-run", name))
-	}
 
 	filename := args[0]
 	path := args[1]
 	text := args[2]
 
-	dry_run := false
-	if len(args) == 4 {
-		if args[3] != "--dry-run" {
-			return report_usage_error(fmt.tprintf("unknown option '%s' for %s", args[3], name))
-		}
-		dry_run = true
+	flags, flag_message := parse_flags(args[3:], name, Flag_Options{allow_dry_run = true})
+	if flag_message != "" {
+		return report_usage_error(flag_message)
 	}
 
 	source, read_err := os.read_entire_file(filename, context.allocator)
@@ -620,16 +699,26 @@ run_edit :: proc(args: []string, mode: Edit_Mode, allocator := context.allocator
 		return EXIT_PARSE_ERROR
 	}
 
-	value := scalar_node(text)
-	edited, lookup_err := node_edit(document.root, path, value, mode == .Add)
+	root, lookup_err := pick_document(document, flags)
 	if lookup_err.kind != .None {
 		print_lookup_error(lookup_err, path)
 		return EXIT_LOOKUP_ERROR
 	}
 
-	output := emitter.emit_document(edited, emitter.detect_indent(string(source)), allocator)
+	value := scalar_node(text)
+	edited: ^parser.YamlNode
+	edited, lookup_err = node_edit(root, path, value, mode == .Add)
+	if lookup_err.kind != .None {
+		print_lookup_error(lookup_err, path)
+		return EXIT_LOOKUP_ERROR
+	}
 
-	if dry_run {
+	// the whole stream goes back out, so the documents behind the one being
+	// edited are written back instead of being dropped
+	document.documents[flags.document] = edited
+	output := emitter.emit_stream(document.documents, emitter.detect_indent(string(source)), allocator)
+
+	if flags.dry_run {
 		fmt.print(output)
 		return EXIT_OK
 	}

@@ -25,8 +25,28 @@ Node_Reference :: struct {
 // Odin has no methods, so every writer procedure takes the emitter first, the
 // same way core:os does it for a file.
 
+// emit_document writes a single document behind its --- marker
 emit_document :: proc(node: ^parser.YamlNode, indent := DEFAULT_INDENT, allocator := context.allocator) -> string {
 	e := emitter_init(indent, allocator)
+	write_document(&e, node)
+	return strings.to_string(e.builder)
+}
+
+// emit_stream writes every document of a stream, each one behind its own
+// marker, so that a file holding more than one of them comes back out whole
+// instead of stopping at the first
+emit_stream :: proc(documents: [dynamic]^parser.YamlNode, indent := DEFAULT_INDENT, allocator := context.allocator) -> string {
+	e := emitter_init(indent, allocator)
+	for node in documents {
+		write_document(&e, node)
+		// an anchor only means something inside the document that named it, so
+		// the ones written so far mean nothing to the document behind this one
+		clear(&e.written)
+	}
+	return strings.to_string(e.builder)
+}
+
+write_document :: proc(e: ^Emitter, node: ^parser.YamlNode) {
 	// the parser refuses to read a document that does not open with a marker
 	strings.write_string(&e.builder, "---\n")
 
@@ -39,8 +59,11 @@ emit_document :: proc(node: ^parser.YamlNode, indent := DEFAULT_INDENT, allocato
 		e.written[node] = node.anchor
 	}
 
-	write_node(&e, node, 0)
-	return strings.to_string(e.builder)
+	write_node(e, node, 0)
+
+	// the marker that closes a document is what tells the parser where the one
+	// behind it begins
+	strings.write_string(&e.builder, "...\n")
 }
 
 // detect_indent guesses the indent unit of a source document from its shortest

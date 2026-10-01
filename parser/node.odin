@@ -45,5 +45,16 @@ SequenceNode :: struct {
 }
 
 YamlDocument :: struct {
-	root: ^YamlNode,
+	// every document the stream holds, one entry per --- marker, in the order
+	// the file writes them
+	documents: [dynamic]^YamlNode,
+}
+
+// document_at hands back the document standing at index in the stream, or
+// nothing when the stream holds fewer documents than that
+document_at :: proc(document: YamlDocument, index: int) -> ^YamlNode {
+	if index < 0 || index >= len(document.documents) {
+		return nil
+	}
+	return document.documents[index]
 }
