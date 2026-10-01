@@ -105,6 +105,16 @@ A numeric path segment edits a list, so `set config.yaml sequence_key.1 item9` r
 
 The catch is that the document gets written back out from the parsed tree, so comments, blank lines, quote style, and the exact spacing of the original are gone. That is the price of not keeping the source around, and `--dry-run` is there so you can see the result before it lands. The parser only reads lists of plain values for now, so a list of lists or a list of mappings cannot be written yet, even though the editing side is ready for it.
 
+A key written twice in the same mapping is a parse error instead of a quiet pick between the two, because a lookup would otherwise hand back whichever one it happens to reach first:
+
+```yaml
+---
+name: yaml-parser
+name: next-version   # parser error, "name" is already defined above
+```
+
+The same key showing up in two documents of a stream, or in two items of a list, is a different mapping every time, so that stays fine.
+
 ## Anchors and aliases
 
 An anchor gives a value a name, and an alias reads that value back, so a block that shows up in several places only has to be written once:

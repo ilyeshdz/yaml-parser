@@ -58,3 +58,15 @@ document_at :: proc(document: YamlDocument, index: int) -> ^YamlNode {
 	}
 	return document.documents[index]
 }
+
+// mapping_pair_index is the position of the pair holding segment as its key, or
+// -1 when no pair of mapping is written under that key
+mapping_pair_index :: proc(mapping: MappingNode, segment: string) -> int {
+	for pair, index in mapping.pairs {
+		key, is_scalar := pair.key.value.(ScalarNode)
+		if is_scalar && key.value == segment {
+			return index
+		}
+	}
+	return -1
+}

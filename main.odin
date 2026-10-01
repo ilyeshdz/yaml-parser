@@ -287,7 +287,7 @@ node_edit :: proc(node: ^parser.YamlNode, path: string, value: ^parser.YamlNode,
 
 	// a path of one segment is the key to write into this mapping
 	if first_dot < 0 {
-		index := mapping_pair_index(mapping, path)
+		index := parser.mapping_pair_index(mapping, path)
 		switch {
 		case index >= 0 && create:
 			// adding to a key that is a sequence appends to it, anything else
@@ -314,7 +314,7 @@ node_edit :: proc(node: ^parser.YamlNode, path: string, value: ^parser.YamlNode,
 		return nil, Lookup_Error{kind = .Empty_Segment}
 	}
 
-	child_index := mapping_pair_index(mapping, head)
+	child_index := parser.mapping_pair_index(mapping, head)
 	if child_index < 0 && !create {
 		return nil, Lookup_Error{kind = .Key_Not_Found, segment = head}
 	}
@@ -336,16 +336,6 @@ node_edit :: proc(node: ^parser.YamlNode, path: string, value: ^parser.YamlNode,
 	}
 
 	return wrap_mapping(pairs), Lookup_Error{}
-}
-
-mapping_pair_index :: proc(mapping: parser.MappingNode, segment: string) -> int {
-	for pair, index in mapping.pairs {
-		key, is_scalar := pair.key.value.(parser.ScalarNode)
-		if is_scalar && key.value == segment {
-			return index
-		}
-	}
-	return -1
 }
 
 new_pair :: proc(segment: string, value: ^parser.YamlNode) -> parser.MappingPair {

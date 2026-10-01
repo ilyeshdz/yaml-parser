@@ -148,6 +148,18 @@ parse_mapping :: proc(p: ^Parser, mapping: ^MappingNode) -> (err: yaml_error.Yam
 			return
 		}
 
+		// a key written twice would read back as whichever of the two the
+		// lookup happens to reach first, so the file is said to be wrong instead
+		if mapping_pair_index(mapping^, p.previous.text) >= 0 {
+			err = yaml_error.ParserError {
+				kind    = .DuplicateKey,
+				message = fmt.tprintf("key %q is already defined in this mapping, the second one would never be read", p.previous.text),
+				line    = p.previous.line,
+				col     = p.previous.col,
+			}
+			return
+		}
+
 		err = parser_expect(p, .Colon)
 		if err != nil { return }
 

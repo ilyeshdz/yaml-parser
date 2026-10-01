@@ -20,6 +20,7 @@ ParserErrorKind :: enum {
 	InvalidIndentation,
 	UnknownAnchor,
 	DuplicateAnchor,
+	DuplicateKey,
 	RecursiveAlias,
 }
 
