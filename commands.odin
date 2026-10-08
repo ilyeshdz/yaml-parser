@@ -2,45 +2,19 @@ package main
 
 import "core:fmt"
 import "core:os"
-import "emitter"
-import "lexer"
-import "parser"
-
-parse_source :: proc(source: string, allocator := context.allocator) -> (document: parser.YamlDocument, err: Load_Error) {
-	my_lexer := lexer.lexer_init(source)
-
-	my_parser, parser_err := parser.parser_init(&my_lexer)
-	if parser_err != nil {
-		return {}, parser_err
-	}
-
-	parsed, parse_err := parser.parser_parse(&my_parser, allocator)
-	if parse_err != nil {
-		return {}, parse_err
-	}
-
-	return parsed, nil
-}
-
-load_document :: proc(filename: string, allocator := context.allocator) -> (document: parser.YamlDocument, err: Load_Error) {
-	source, read_err := os.read_entire_file(filename, context.allocator)
-	if read_err != nil {
-		return {}, read_err
-	}
-
-	return parse_source(string(source), allocator)
-}
+import yaml "yaml"
+import "yaml/parser"
 
 run_dump :: proc(filename: string, allocator := context.allocator) -> int {
 	label := filename
 	document: parser.YamlDocument
-	err: Load_Error
+	err: yaml.Load_Error
 
 	if filename == "" {
 		label = SAMPLE_NAME
-		document, err = parse_source(SAMPLE_DOCUMENT, allocator)
+		document, err = yaml.parse_string(SAMPLE_DOCUMENT, allocator)
 	} else {
-		document, err = load_document(filename, allocator)
+		document, _, err = yaml.load_file(filename, allocator)
 	}
 
 	if err != nil {
@@ -72,7 +46,7 @@ run_get :: proc(args: []string, allocator := context.allocator) -> int {
 		return report_usage_error(flag_message)
 	}
 
-	document, err := load_document(filename, allocator)
+	document, _, err := yaml.load_file(filename, allocator)
 	if err != nil {
 		print_load_error(err, filename)
 		return EXIT_PARSE_ERROR
@@ -124,13 +98,7 @@ run_edit :: proc(args: []string, mode: Edit_Mode, allocator := context.allocator
 		return report_usage_error(flag_message)
 	}
 
-	source, read_err := os.read_entire_file(filename, context.allocator)
-	if read_err != nil {
-		fmt.eprintf("Failed to read file %s: %v\n", filename, read_err)
-		return EXIT_PARSE_ERROR
-	}
-
-	document, err := parse_source(string(source), allocator)
+	document, source, err := yaml.load_file(filename, allocator)
 	if err != nil {
 		print_load_error(err, filename)
 		return EXIT_PARSE_ERROR
@@ -153,7 +121,7 @@ run_edit :: proc(args: []string, mode: Edit_Mode, allocator := context.allocator
 	// the whole stream goes back out, so the documents behind the one being
 	// edited are written back instead of being dropped
 	document.documents[flags.document] = edited
-	output := emitter.emit_stream(document.documents, emitter.detect_indent(string(source)), allocator)
+	output := yaml.render_stream(document.documents, source, allocator)
 
 	if flags.dry_run {
 		fmt.print(output)
@@ -256,7 +224,7 @@ is_flag :: proc(arg: string) -> bool {
 // lookup_collection loads a file and walks it to the node a key path points
 // at, or to the document itself when the path is empty
 lookup_collection :: proc(filename: string, path: string, flags: Flag_Values, allocator := context.allocator) -> (node: ^parser.YamlNode, code: int) {
-	document, err := load_document(filename, allocator)
+	document, _, err := yaml.load_file(filename, allocator)
 	if err != nil {
 		print_load_error(err, filename)
 		return nil, EXIT_PARSE_ERROR
@@ -294,13 +262,7 @@ run_delete :: proc(args: []string, allocator := context.allocator) -> int {
 		return report_usage_error(flag_message)
 	}
 
-	source, read_err := os.read_entire_file(filename, context.allocator)
-	if read_err != nil {
-		fmt.eprintf("Failed to read file %s: %v\n", filename, read_err)
-		return EXIT_PARSE_ERROR
-	}
-
-	document, err := parse_source(string(source), allocator)
+	document, source, err := yaml.load_file(filename, allocator)
 	if err != nil {
 		print_load_error(err, filename)
 		return EXIT_PARSE_ERROR
@@ -322,7 +284,7 @@ run_delete :: proc(args: []string, allocator := context.allocator) -> int {
 	// the whole stream goes back out, so the documents behind the one being
 	// edited are written back instead of being dropped
 	document.documents[flags.document] = edited
-	output := emitter.emit_stream(document.documents, emitter.detect_indent(string(source)), allocator)
+	output := yaml.render_stream(document.documents, source, allocator)
 
 	if flags.dry_run {
 		fmt.print(output)

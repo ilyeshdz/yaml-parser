@@ -2,8 +2,8 @@ package main
 
 import "core:strconv"
 import "core:strings"
-import "lexer"
-import "parser"
+import yaml "yaml"
+import "yaml/parser"
 
 // node_edit returns a copy of the document with one key changed. Nodes are
 // never touched in place, because a mapping lives inside a union and a union
@@ -302,70 +302,12 @@ wrap_sequence :: proc(items: [dynamic]^parser.YamlNode) -> ^parser.YamlNode {
 	return node
 }
 
-// scalar_from_text types a value the same way the parser types what it reads,
-// so a value written by set and add comes back out of get with the same type.
-scalar_from_text :: proc(text: string) -> parser.ScalarNode {
-	switch text {
-	case "true", "false":
-		return parser.ScalarNode{text, .Boolean}
-	case "null", "~":
-		return parser.ScalarNode{text, .Null}
-	}
-
-	if lexer.is_timestamp(text) {
-		return parser.ScalarNode{text, .Timestamp}
-	}
-
-	if is_number(text) {
-		kind := parser.ScalarType.Integer
-		if is_float_text(text) {
-			kind = .Float
-		}
-		return parser.ScalarNode{text, kind}
-	}
-
-	return parser.ScalarNode{text, .String}
-}
-
 scalar_node :: proc(text: string, force_string := false) -> ^parser.YamlNode {
 	node := new(parser.YamlNode)
 	if force_string {
 		node^ = parser.YamlNode{.Scalar, parser.ScalarNode{text, .String}, ""}
 		return node
 	}
-	node^ = parser.YamlNode{.Scalar, scalar_from_text(text), ""}
+	node^ = parser.YamlNode{.Scalar, yaml.scalar_from_text(text), ""}
 	return node
-}
-
-// a dot or an exponent anywhere is what makes the lexer call a number a float
-is_float_text :: proc(text: string) -> bool {
-	for i in 0 ..< len(text) {
-		switch text[i] {
-		case '.', 'e', 'E':
-			return true
-		}
-	}
-	return false
-}
-
-is_number :: proc(text: string) -> bool {
-	if text == "" {
-		return false
-	}
-
-	digits := text
-	if digits[0] == '-' || digits[0] == '+' {
-		digits = digits[1:]
-	}
-	if digits == "" {
-		return false
-	}
-
-	if is_float_text(digits) {
-		_, ok := strconv.parse_f64(text)
-		return ok
-	}
-
-	_, ok := strconv.parse_int(text)
-	return ok
 }

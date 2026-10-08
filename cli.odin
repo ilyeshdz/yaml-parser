@@ -3,15 +3,11 @@ package main
 import "core:fmt"
 import "core:os"
 import "core:strconv"
-import "parser"
-import yaml_error "yaml_error"
+import yaml "yaml"
+import "yaml/parser"
+import yaml_error "yaml/yaml_error"
 
-Load_Error :: union {
-	os.Error,
-	yaml_error.YamlError,
-}
-
-print_load_error :: proc(err: Load_Error, filename: string) {
+print_load_error :: proc(err: yaml.Load_Error, filename: string) {
 	switch e in err {
 	case os.Error:
 		fmt.eprintf("Failed to read file %s: %v\n", filename, e)

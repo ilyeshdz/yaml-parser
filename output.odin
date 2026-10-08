@@ -2,8 +2,8 @@ package main
 
 import "core:fmt"
 import "core:strings"
-import "parser"
-import yaml_error "yaml_error"
+import "yaml/parser"
+import yaml_error "yaml/yaml_error"
 
 print_error :: proc(err: yaml_error.YamlError) {
 	switch e in err {

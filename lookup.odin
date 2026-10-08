@@ -2,7 +2,7 @@ package main
 
 import "core:strconv"
 import "core:strings"
-import "parser"
+import "yaml/parser"
 
 Lookup_Error_Kind :: enum {
 	None,
