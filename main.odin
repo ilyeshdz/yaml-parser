@@ -162,7 +162,8 @@ edit is lost:
 set and add write the whole file back out, which means comments and the
 original spacing are not kept. Pass --dry-run to see the result first. The
 value is typed the way the parser would type it, so 1.5 is a float, true is a
-boolean and 2026-10-01 is a timestamp.
+boolean and 2026-10-01 is a timestamp. Pass --string to keep the value a
+string instead, so 42 stays the string "42".
 
 A numeric path segment edits a list item, where set replaces the item and add
 puts the value in front of it, so adding at the length of the list appends to
@@ -461,8 +462,12 @@ scalar_from_text :: proc(text: string) -> parser.ScalarNode {
 	return parser.ScalarNode{text, .String}
 }
 
-scalar_node :: proc(text: string) -> ^parser.YamlNode {
+scalar_node :: proc(text: string, force_string := false) -> ^parser.YamlNode {
 	node := new(parser.YamlNode)
+	if force_string {
+		node^ = parser.YamlNode{.Scalar, parser.ScalarNode{text, .String}, ""}
+		return node
+	}
 	node^ = parser.YamlNode{.Scalar, scalar_from_text(text), ""}
 	return node
 }
@@ -571,12 +576,15 @@ run_dump :: proc(filename: string, allocator := context.allocator) -> int {
 Flag_Options :: struct {
 	allow_type:    bool,
 	allow_dry_run: bool,
+	allow_string:  bool,
 }
 
 // Flag_Values is what the options behind the positional arguments asked for
 Flag_Values :: struct {
-	show_type: bool,
-	dry_run:   bool,
+	show_type:    bool,
+	dry_run:      bool,
+	// store the edited value as a string instead of typing it
+	force_string: bool,
 	// the document of the stream the command works on, 0 being the first one
 	document:  int,
 }
@@ -597,6 +605,11 @@ parse_flags :: proc(args: []string, name: string, options: Flag_Options) -> (fla
 				return Flag_Values{}, fmt.tprintf("unknown option '%s' for %s", args[i], name)
 			}
 			flags.dry_run = true
+		case "--string":
+			if !options.allow_string {
+				return Flag_Values{}, fmt.tprintf("unknown option '%s' for %s", args[i], name)
+			}
+			flags.force_string = true
 		case "--doc":
 			if i + 1 >= len(args) {
 				return Flag_Values{}, "--doc needs a document number"
@@ -681,7 +694,7 @@ run_edit :: proc(args: []string, mode: Edit_Mode, allocator := context.allocator
 	path := args[1]
 	text := args[2]
 
-	flags, flag_message := parse_flags(args[3:], name, Flag_Options{allow_dry_run = true})
+	flags, flag_message := parse_flags(args[3:], name, Flag_Options{allow_dry_run = true, allow_string = true})
 	if flag_message != "" {
 		return report_usage_error(flag_message)
 	}
@@ -704,7 +717,7 @@ run_edit :: proc(args: []string, mode: Edit_Mode, allocator := context.allocator
 		return EXIT_LOOKUP_ERROR
 	}
 
-	value := scalar_node(text)
+	value := scalar_node(text, flags.force_string)
 	edited: ^parser.YamlNode
 	edited, lookup_err = node_edit(root, path, value, mode == .Add)
 	if lookup_err.kind != .None {

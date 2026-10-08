@@ -99,7 +99,7 @@ name: next-version
 ...
 ```
 
-`add` makes the mappings the path needs on its way down, and complains if the key is already there, while `set` only replaces what is already in the file. The value is typed the way the parser would type it, so `1.5` comes back as a float, `true` as a boolean, `2026-10-01` as a timestamp, and anything with a space in it gets quoted for you. There is no way to ask for a string, so `42` is always the integer 42.
+`add` makes the mappings the path needs on its way down, and complains if the key is already there, while `set` only replaces what is already in the file. The value is typed the way the parser would type it, so `1.5` comes back as a float, `true` as a boolean, `2026-10-01` as a timestamp, and anything with a space in it gets quoted for you. Pass `--string` to keep the value a string instead, so `42` stays the string `"42"`.
 
 A numeric path segment edits a list, so `set config.yaml sequence_key.1 item9` replaces the second item and `add config.yaml sequence_key.0 first` puts a new item in front of it. Adding at the length of the list appends to it, and adding to a key that is a list without an index appends as well, which is what the last example above does. Only items that are already in the list can be set, so an index past the end is an error.
 
