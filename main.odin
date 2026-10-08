@@ -510,10 +510,17 @@ print_value :: proc(node: ^parser.YamlNode) {
 }
 
 print_scalar_type :: proc(node: ^parser.YamlNode) {
-	scalar, is_scalar := node.value.(parser.ScalarNode)
-	if !is_scalar {
+	switch node.kind {
+	case .Mapping:
+		fmt.println("mapping")
 		return
+	case .Sequence:
+		fmt.println("sequence")
+		return
+	case .Scalar:
 	}
+
+	scalar := node.value.(parser.ScalarNode)
 
 	switch scalar.type {
 	case .String:
@@ -655,10 +662,6 @@ run_get :: proc(args: []string, allocator := context.allocator) -> int {
 	}
 
 	if flags.show_type {
-		if node.kind != .Scalar {
-			fmt.eprintf("Error: '%s' is a %v, so it has no scalar type\n", path, node.kind)
-			return EXIT_USAGE_ERROR
-		}
 		print_scalar_type(node)
 		return EXIT_OK
 	}
