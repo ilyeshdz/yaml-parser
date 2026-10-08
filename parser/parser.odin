@@ -262,6 +262,14 @@ parse_node :: proc(p: ^Parser) -> (node: ^YamlNode, err: yaml_error.YamlError) {
 		return
 	}
 
+	if p.current.kind == .LBracket {
+		seq := SequenceNode{}
+		err = parse_flow_sequence(p, &seq)
+		if err != nil { return }
+		node^ = YamlNode{.Sequence, seq, ""}
+		return
+	}
+
 	// an empty value means null
 	if p.current.kind == .Dedent || p.current.kind == .Eof ||
 	   p.current.kind == .StreamEnd || p.current.kind == .StreamStart ||
@@ -346,6 +354,62 @@ parse_bullet :: proc(p: ^Parser) -> (item: ^YamlNode, err: yaml_error.YamlError)
 		item, err = parse_value(p)
 		return
 	}
+}
+
+// parse_flow_sequence reads a flow sequence like [1, 2, 3], where the items
+// sit on one line between brackets instead of on bullets below. The items
+// are read like any other value, so anchors, aliases and nested flow
+// sequences work the same way, and an empty pair of brackets holds nothing.
+parse_flow_sequence :: proc(p: ^Parser, seq: ^SequenceNode) -> (err: yaml_error.YamlError) {
+	err = parser_expect(p, .LBracket)
+	if err != nil { return }
+
+	err = skip_newlines(p)
+	if err != nil { return }
+
+	if p.current.kind == .RBracket {
+		err = parser_advance(p)
+		return
+	}
+
+	for {
+		item: ^YamlNode
+		item, err = parse_flow_item(p)
+		if err != nil { return }
+		append(&seq.items, item)
+
+		err = skip_newlines(p)
+		if err != nil { return }
+
+		if p.current.kind == .Comma {
+			err = parser_advance(p)
+			if err != nil { return }
+			continue
+		}
+
+		if p.current.kind == .RBracket {
+			err = parser_advance(p)
+			return
+		}
+
+		err = yaml_error.ParserError {
+			kind    = .ExpectedToken,
+			message = fmt.tprintf("expected , or ] but got %s", p.current.kind),
+			line    = p.current.line,
+			col     = p.current.col,
+		}
+		return
+	}
+}
+
+// parse_flow_item reads one item of a flow sequence, which is any value a
+// block value could be, including a flow sequence nested in the outer one
+parse_flow_item :: proc(p: ^Parser) -> (item: ^YamlNode, err: yaml_error.YamlError) {
+	err = skip_newlines(p)
+	if err != nil { return }
+
+	item, err = parse_value(p)
+	return
 }
 
 // continue_sequence carries a list a bullet opened onto the lines that are

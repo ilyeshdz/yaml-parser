@@ -10,7 +10,7 @@ Also, reading the YAML spec was... an experience. Did you know YAML technically 
 
 The lexer handles identifiers, quoted strings, integers, floats, dates, indentation, the markers that open and close a document, bullets, colons, and anchors and aliases. The parser is a recursive descent parser that walks every document of a stream and handles flat and nested block mappings, block sequences, and typed scalar values (string, integer, float, boolean, null, timestamp) with proper error propagation. The emitter goes the other way and writes a parsed stream back out as YAML, which is what makes editing a value in a file possible.
 
-I think that's pretty much it for the core of it. Sure, there are things I could add like flow sequences, but honestly this does what I need it to do. Might add more stuff later, might not. We'll see.
+I think that's pretty much it for the core of it. The emitter writes everything back out in block style, apart from an empty sequence, which goes out as `[]` because a block has no way to hold nothing. Might add more stuff later, might not. We'll see.
 
 ## Usage
 
@@ -131,6 +131,19 @@ name: next-version   # parser error, "name" is already defined above
 ```
 
 The same key showing up in two documents of a stream, or in two items of a list, is a different mapping every time, so that stays fine.
+
+## Flow sequences
+
+A sequence can also sit on one line between brackets instead of on bullets below:
+
+```yaml
+---
+ports: [80, 443]
+matrix: [[1, 2], [3]]
+nothing: []
+```
+
+`get`, `set`, `add` and `del` walk a flow sequence with the same numeric path they use for a block one, so `yaml-parser get config.yaml ports.0` is `80`. Anchors and aliases work inside the brackets too. An edit writes a non-empty flow sequence back out as a block sequence, which reads the same but looks different, while an empty one stays `[]` so it still reads back as a sequence. Flow mappings (`{a: b}`) are not supported and say so instead of quietly doing nothing.
 
 ## Dates
 

@@ -159,6 +159,16 @@ write_value :: proc(e: ^Emitter, value: ^parser.YamlNode, depth: int) {
 	switch v in value.value {
 	case parser.MappingNode, parser.SequenceNode:
 		strings.write_string(&e.builder, " ")
+		if seq, is_seq := value.value.(parser.SequenceNode); is_seq && len(seq.items) == 0 && !reference.is_alias {
+			// an empty sequence has no block form, so it goes out in flow
+			// brackets, which is the only way it reads back as a sequence
+			if reference.text != "" {
+				strings.write_string(&e.builder, reference.text)
+				strings.write_string(&e.builder, " ")
+			}
+			strings.write_string(&e.builder, "[]\n")
+			return
+		}
 		if reference.text == "" {
 			strings.write_string(&e.builder, "\n")
 			write_node(e, value, depth + 1)

@@ -288,7 +288,8 @@ lexer_lex_number :: proc(l: ^Lexer) -> (tok: Token, err: yaml_error.YamlError) {
 
 	start := l.position
 	is_float := false
-	for l.ch != ' ' && l.ch != ':' && l.ch != '\n' && l.ch != '\r' && l.ch != '\t' && l.ch != 0 {
+	for l.ch != ' ' && l.ch != ':' && l.ch != '\n' && l.ch != '\r' && l.ch != '\t' && l.ch != ',' &&
+	    l.ch != '[' && l.ch != ']' && l.ch != '{' && l.ch != '}' && l.ch != 0 {
 		if (l.ch == '.' || l.ch == 'e' || l.ch == 'E') && !is_float {
 			is_float = true
 		}
@@ -327,7 +328,7 @@ lexer_lex_name :: proc(l: ^Lexer, kind: Token_Kind) -> (tok: Token, err: yaml_er
 
 	start := l.position
 	for l.ch != ' ' && l.ch != ':' && l.ch != '\n' && l.ch != '\r' && l.ch != '\t' &&
-	    l.ch != ',' && l.ch != '#' && l.ch != 0 {
+	    l.ch != ',' && l.ch != '[' && l.ch != ']' && l.ch != '#' && l.ch != 0 {
 		lexer_read_char(l)
 	}
 	tok.text = l.input[start:l.position]
@@ -428,6 +429,26 @@ lexer_next_token :: proc(l: ^Lexer) -> (tok: Token, err: yaml_error.YamlError) {
 	case ':':
 		tok.kind = .Colon
 		tok.text = ":"
+		lexer_read_char(l)
+	case ',':
+		tok.kind = .Comma
+		tok.text = ","
+		lexer_read_char(l)
+	case '[':
+		tok.kind = .LBracket
+		tok.text = "["
+		lexer_read_char(l)
+	case ']':
+		tok.kind = .RBracket
+		tok.text = "]"
+		lexer_read_char(l)
+	case '{':
+		tok.kind = .LBrace
+		tok.text = "{"
+		lexer_read_char(l)
+	case '}':
+		tok.kind = .RBrace
+		tok.text = "}"
 		lexer_read_char(l)
 	case '-':
 		if lexer_peek_ahead(l) == ' ' {
@@ -554,7 +575,8 @@ lexer_next_token :: proc(l: ^Lexer) -> (tok: Token, err: yaml_error.YamlError) {
 	case:
 		start := l.position
 		tok.kind = .Identifier
-		for l.ch != ' ' && l.ch != ':' && l.ch != '\n' && l.ch != '\r' && l.ch != '\t' && l.ch != 0 {
+		for l.ch != ' ' && l.ch != ':' && l.ch != '\n' && l.ch != '\r' && l.ch != '\t' && l.ch != ',' &&
+		    l.ch != '[' && l.ch != ']' && l.ch != 0 {
 			lexer_read_char(l)
 		}
 		tok.text = l.input[start:l.position]
