@@ -1,7 +1,6 @@
-// Package yaml is the parsing library behind the yaml-parser command. It
-// reads YAML text into documents, types plain values the way the parser
-// types what it reads, and writes documents back out as YAML, while the
-// command itself only handles flags, key paths and printing.
+// Package yaml reads YAML text into documents, types plain values the way
+// the parser types what it reads, looks documents up and edits them by key
+// path, and writes documents back out as YAML.
 package yaml
 
 import "core:os"

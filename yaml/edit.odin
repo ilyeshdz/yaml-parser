@@ -1,9 +1,8 @@
-package main
+package yaml
 
 import "core:strconv"
 import "core:strings"
-import yaml "yaml"
-import "yaml/parser"
+import "parser"
 
 // node_edit returns a copy of the document with one key changed. Nodes are
 // never touched in place, because a mapping lives inside a union and a union
@@ -308,6 +307,6 @@ scalar_node :: proc(text: string, force_string := false) -> ^parser.YamlNode {
 		node^ = parser.YamlNode{.Scalar, parser.ScalarNode{text, .String}, ""}
 		return node
 	}
-	node^ = parser.YamlNode{.Scalar, yaml.scalar_from_text(text), ""}
+	node^ = parser.YamlNode{.Scalar, scalar_from_text(text), ""}
 	return node
 }

@@ -1,8 +1,8 @@
-package main
+package yaml
 
 import "core:strconv"
 import "core:strings"
-import "yaml/parser"
+import "parser"
 
 Lookup_Error_Kind :: enum {
 	None,
