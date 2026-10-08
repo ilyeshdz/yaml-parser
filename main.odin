@@ -139,6 +139,7 @@ Usage:
   yaml-parser dump <file>              parse <file> and print the whole tree
   yaml-parser get <file> <key.path>    print the value found at <key.path>
   yaml-parser get <file> <key.path> -t print the type of that value instead
+  yaml-parser get <file> <key.path> --default <v> print <v> when the path is missing
   yaml-parser set <file> <key.path> <value> replace the value at <key.path>
   yaml-parser add <file> <key.path> <value> add a new key at <key.path>
   yaml-parser del <file> <key.path>    delete the value at <key.path>
@@ -632,6 +633,16 @@ print_value :: proc(node: ^parser.YamlNode) {
 	print_yaml_node(node, 0)
 }
 
+// print_default prints the --default value of a get whose key path missed,
+// typed the way a value written by set would be when -t asks for the type
+print_default :: proc(flags: Flag_Values, allocator := context.allocator) {
+	if flags.show_type {
+		print_scalar_type(scalar_node(flags.default_value))
+		return
+	}
+	fmt.println(flags.default_value)
+}
+
 print_scalar_type :: proc(node: ^parser.YamlNode) {
 	switch node.kind {
 	case .Mapping:
@@ -695,6 +706,7 @@ Flag_Options :: struct {
 	allow_type:    bool,
 	allow_dry_run: bool,
 	allow_string:  bool,
+	allow_default: bool,
 }
 
 // Flag_Values is what the options behind the positional arguments asked for
@@ -703,6 +715,9 @@ Flag_Values :: struct {
 	dry_run:      bool,
 	// store the edited value as a string instead of typing it
 	force_string: bool,
+	// print this instead of failing when the key path is not found
+	default_value: string,
+	has_default:   bool,
 	// the document of the stream the command works on, 0 being the first one
 	document:  int,
 }
@@ -738,6 +753,16 @@ parse_flags :: proc(args: []string, name: string, options: Flag_Options) -> (fla
 			}
 			flags.document = number
 			i += 1
+		case "--default":
+			if !options.allow_default {
+				return Flag_Values{}, fmt.tprintf("unknown option '%s' for %s", args[i], name)
+			}
+			if i + 1 >= len(args) {
+				return Flag_Values{}, "--default needs a value"
+			}
+			flags.default_value = args[i + 1]
+			flags.has_default = true
+			i += 1
 		case:
 			return Flag_Values{}, fmt.tprintf("unknown option '%s' for %s", args[i], name)
 		}
@@ -768,7 +793,7 @@ run_get :: proc(args: []string, allocator := context.allocator) -> int {
 	filename := args[0]
 	path := args[1]
 
-	flags, flag_message := parse_flags(args[2:], "get", Flag_Options{allow_type = true})
+	flags, flag_message := parse_flags(args[2:], "get", Flag_Options{allow_type = true, allow_default = true})
 	if flag_message != "" {
 		return report_usage_error(flag_message)
 	}
@@ -781,6 +806,10 @@ run_get :: proc(args: []string, allocator := context.allocator) -> int {
 
 	root, lookup_err := pick_document(document, flags)
 	if lookup_err.kind != .None {
+		if flags.has_default {
+			print_default(flags, allocator)
+			return EXIT_OK
+		}
 		print_lookup_error(lookup_err, path)
 		return EXIT_LOOKUP_ERROR
 	}
@@ -788,6 +817,10 @@ run_get :: proc(args: []string, allocator := context.allocator) -> int {
 	node: ^parser.YamlNode
 	node, lookup_err = node_lookup(root, path)
 	if lookup_err.kind != .None {
+		if flags.has_default {
+			print_default(flags, allocator)
+			return EXIT_OK
+		}
 		print_lookup_error(lookup_err, path)
 		return EXIT_LOOKUP_ERROR
 	}

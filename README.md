@@ -37,10 +37,12 @@ $ yaml-parser get config.yaml sequence_key.1
 item2
 $ yaml-parser get config.yaml version -t
 float
+$ yaml-parser get config.yaml nickname --default nobody
+nobody
 $ VERSION=$(yaml-parser get config.yaml version)
 ```
 
-If the key path points at a mapping or a sequence, the whole subtree is printed instead of a single value. Everything the parser cannot resolve (missing key, bad index, path going into a scalar) goes to stderr and exits with 3, a broken file exits with 1, a wrong command exits with 2, and a file that cannot be written exits with 4.
+If the key path points at a mapping or a sequence, the whole subtree is printed instead of a single value. Everything the parser cannot resolve (missing key, bad index, path going into a scalar) goes to stderr and exits with 3, a broken file exits with 1, a wrong command exits with 2, and a file that cannot be written exits with 4. Pass `--default <v>` to print a fallback instead of failing when the path is missing, which is what scripts waiting for an optional key want:
 
 ## More than one document in a file
 
