@@ -27,6 +27,54 @@ Lookup_Error :: struct {
 	node_kind: parser.YamlNodeKind,
 }
 
+// child hands back the value a mapping holds under key, and reports whether
+// it holds one, which is the single-level step node_lookup walks by
+child :: proc(node: ^Node, key: string) -> (found: ^Node, ok: bool) {
+	mapping, is_mapping := node.value.(parser.MappingNode)
+	if !is_mapping {
+		return nil, false
+	}
+	for pair in mapping.pairs {
+		k, is_scalar := pair.key.value.(parser.ScalarNode)
+		if is_scalar && k.value == key {
+			return pair.value, true
+		}
+	}
+	return nil, false
+}
+
+// at hands back the item a sequence holds at index, and reports whether it
+// holds one, which is the single-level step node_lookup walks by
+at :: proc(node: ^Node, index: int) -> (found: ^Node, ok: bool) {
+	sequence, is_sequence := node.value.(parser.SequenceNode)
+	if !is_sequence || index < 0 || index >= len(sequence.items) {
+		return nil, false
+	}
+	return sequence.items[index], true
+}
+
+// keys lists the plain string keys of a mapping in order, and reports whether
+// the node is one
+keys :: proc(node: ^Node, allocator := context.allocator) -> (names: [dynamic]string, ok: bool) {
+	mapping, is_mapping := node.value.(parser.MappingNode)
+	if !is_mapping {
+		return nil, false
+	}
+	for pair in mapping.pairs {
+		if k, is_scalar := pair.key.value.(parser.ScalarNode); is_scalar {
+			append(&names, k.value)
+		}
+	}
+	return names, true
+}
+
+// as_scalar hands back the value and the type of a scalar node, and reports
+// whether the node is one
+as_scalar :: proc(node: ^Node) -> (scalar: parser.ScalarNode, ok: bool) {
+	scalar, ok = node.value.(parser.ScalarNode)
+	return scalar, ok
+}
+
 node_lookup :: proc(root: ^parser.YamlNode, path: string) -> (node: ^parser.YamlNode, err: Lookup_Error) {
 	if path == "" {
 		return nil, Lookup_Error{kind = .Empty_Path}

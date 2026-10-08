@@ -301,12 +301,3 @@ wrap_sequence :: proc(items: [dynamic]^parser.YamlNode) -> ^parser.YamlNode {
 	return node
 }
 
-scalar_node :: proc(text: string, force_string := false) -> ^parser.YamlNode {
-	node := new(parser.YamlNode)
-	if force_string {
-		node^ = parser.YamlNode{.Scalar, parser.ScalarNode{text, .String}, ""}
-		return node
-	}
-	node^ = parser.YamlNode{.Scalar, scalar_from_text(text), ""}
-	return node
-}
