@@ -22,6 +22,8 @@ yaml-parser get <file> <key.path> -t   print the type of that value instead
 yaml-parser set <file> <key.path> <value>  replace the value at <key.path>
 yaml-parser add <file> <key.path> <value>  add a new key at <key.path>
 yaml-parser del <file> <key.path>      delete the value at <key.path>
+yaml-parser keys <file> [key.path]  list the keys of a mapping, one per line
+yaml-parser len <file> [key.path]   print how many entries a mapping or sequence holds
 yaml-parser get <file> <key.path> --doc 1  work on the second document
 yaml-parser help                       print the usage text
 ```
@@ -107,6 +109,16 @@ name: next-version
 A numeric path segment edits a list, so `set config.yaml sequence_key.1 item9` replaces the second item and `add config.yaml sequence_key.0 first` puts a new item in front of it. Adding at the length of the list appends to it, and adding to a key that is a list without an index appends as well, which is what the last example above does. Only items that are already in the list can be set, so an index past the end is an error.
 
 `del` drops whatever the path points at and prints the removed value, so `del config.yaml parent_key.child_key` removes that key and `del config.yaml sequence_key.1` removes the second item. Like `set` and `add` it takes `--doc` and `--dry-run`, and a missing key or an index past the end is an error instead of a quiet no-op:
+
+```sh
+$ yaml-parser keys config.yaml parent_key
+child_key
+score
+$ yaml-parser len config.yaml sequence_key
+3
+```
+
+`keys` lists the keys of a mapping one per line, and `len` prints how many entries a mapping or a sequence holds. Both read the whole document when no key path is given, take `--doc` like the other commands, and complain when the path points at a scalar or a missing key.
 
 The catch is that the document gets written back out from the parsed tree, so comments, blank lines, quote style, and the exact spacing of the original are gone. That is the price of not keeping the source around, and `--dry-run` is there so you can see the result before it lands. Sequences hold plain values as well as nested lists and mappings, so a list of lists or a list of mappings round-trips through the emitter.
 

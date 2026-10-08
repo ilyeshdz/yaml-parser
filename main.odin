@@ -143,6 +143,8 @@ Usage:
   yaml-parser set <file> <key.path> <value> replace the value at <key.path>
   yaml-parser add <file> <key.path> <value> add a new key at <key.path>
   yaml-parser del <file> <key.path>    delete the value at <key.path>
+  yaml-parser keys <file> [key.path]  list the keys of a mapping, one per line
+  yaml-parser len <file> [key.path]   print how many entries a mapping or sequence holds
   yaml-parser help                     print this message
 
 Key paths are dot separated, and a numeric segment indexes a sequence:
@@ -898,6 +900,115 @@ run_edit :: proc(args: []string, mode: Edit_Mode, allocator := context.allocator
 
 // run_delete drops the value at a key path and prints what went away, writing
 // the whole stream back out the way set and add do
+// run_keys prints the keys of the mapping at a key path, one per line, and
+// run_len prints how many entries a mapping or a sequence holds. Both walk
+// the path like get does and read the whole document when no path is given.
+run_keys :: proc(args: []string, allocator := context.allocator) -> int {
+	if len(args) < 1 {
+		return report_usage_error("keys takes a file and an optional key path")
+	}
+
+	filename := args[0]
+	path := ""
+	rest := args[1:]
+	if len(args) >= 2 && !is_flag(args[1]) {
+		path = args[1]
+		rest = args[2:]
+	}
+
+	flags, flag_message := parse_flags(rest, "keys", Flag_Options{})
+	if flag_message != "" {
+		return report_usage_error(flag_message)
+	}
+
+	node, code := lookup_collection(filename, path, flags, allocator)
+	if code != EXIT_OK {
+		return code
+	}
+
+	mapping, is_mapping := node.value.(parser.MappingNode)
+	if !is_mapping {
+		fmt.eprintf("Error: '%s' is a %v, so it has no keys\n", path, node.kind)
+		return EXIT_LOOKUP_ERROR
+	}
+
+	for pair in mapping.pairs {
+		if key, is_scalar := pair.key.value.(parser.ScalarNode); is_scalar {
+			fmt.println(key.value)
+		}
+	}
+	return EXIT_OK
+}
+
+run_len :: proc(args: []string, allocator := context.allocator) -> int {
+	if len(args) < 1 {
+		return report_usage_error("len takes a file and an optional key path")
+	}
+
+	filename := args[0]
+	path := ""
+	rest := args[1:]
+	if len(args) >= 2 && !is_flag(args[1]) {
+		path = args[1]
+		rest = args[2:]
+	}
+
+	flags, flag_message := parse_flags(rest, "len", Flag_Options{})
+	if flag_message != "" {
+		return report_usage_error(flag_message)
+	}
+
+	node, code := lookup_collection(filename, path, flags, allocator)
+	if code != EXIT_OK {
+		return code
+	}
+
+	switch v in node.value {
+	case parser.MappingNode:
+		fmt.println(len(v.pairs))
+	case parser.SequenceNode:
+		fmt.println(len(v.items))
+	case parser.ScalarNode:
+		fmt.eprintf("Error: '%s' is a scalar, so it has no length\n", path)
+		return EXIT_LOOKUP_ERROR
+	}
+	return EXIT_OK
+}
+
+// is_flag reports whether an argument is an option instead of a key path,
+// which is how keys and len tell a missing path from a path to read
+is_flag :: proc(arg: string) -> bool {
+	return len(arg) > 2 && arg[:2] == "--" || len(arg) > 1 && arg[0] == '-'
+}
+
+// lookup_collection loads a file and walks it to the node a key path points
+// at, or to the document itself when the path is empty
+lookup_collection :: proc(filename: string, path: string, flags: Flag_Values, allocator := context.allocator) -> (node: ^parser.YamlNode, code: int) {
+	document, err := load_document(filename, allocator)
+	if err != nil {
+		print_load_error(err, filename)
+		return nil, EXIT_PARSE_ERROR
+	}
+
+	root, lookup_err := pick_document(document, flags)
+	if lookup_err.kind != .None {
+		print_lookup_error(lookup_err, path)
+		return nil, EXIT_LOOKUP_ERROR
+	}
+
+	if path == "" {
+		return root, EXIT_OK
+	}
+
+	node, lookup_err = node_lookup(root, path)
+	if lookup_err.kind != .None {
+		print_lookup_error(lookup_err, path)
+		return nil, EXIT_LOOKUP_ERROR
+	}
+
+	return node, EXIT_OK
+}
+
 run_delete :: proc(args: []string, allocator := context.allocator) -> int {
 	if len(args) < 2 {
 		return report_usage_error("del takes a file and a key path")
@@ -997,6 +1108,10 @@ run :: proc(args: []string) -> int {
 		return run_edit(args[2:], .Add, allocator)
 	case "del":
 		return run_delete(args[2:], allocator)
+	case "keys":
+		return run_keys(args[2:], allocator)
+	case "len":
+		return run_len(args[2:], allocator)
 	}
 
 	return report_usage_error(fmt.tprintf("unknown command '%s'", args[1]))
