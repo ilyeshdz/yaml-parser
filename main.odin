@@ -782,6 +782,49 @@ print_yaml_node :: proc(node: ^parser.YamlNode, depth: int = 0) {
 	print_yaml_node_written(node, depth, &written)
 }
 
+// format_dump_scalar prints a scalar the way the emitter writes one, so a
+// value holding a newline stays on one line instead of breaking the tree
+format_dump_scalar :: proc(scalar: parser.ScalarNode) -> string {
+	if scalar.value == "" {
+		if scalar.type == .Null {
+			return "null"
+		}
+		return "\"\""
+	}
+
+	needs_quotes := false
+	for i in 0 ..< len(scalar.value) {
+		switch scalar.value[i] {
+		case '"', '\\', '\n', '\r', '\t':
+			needs_quotes = true
+		}
+	}
+	if !needs_quotes {
+		return scalar.value
+	}
+
+	builder := strings.builder_make_none(context.allocator)
+	strings.write_string(&builder, "\"")
+	for i in 0 ..< len(scalar.value) {
+		switch scalar.value[i] {
+		case '"':
+			strings.write_string(&builder, "\\\"")
+		case '\\':
+			strings.write_string(&builder, "\\\\")
+		case '\n':
+			strings.write_string(&builder, "\\n")
+		case '\r':
+			strings.write_string(&builder, "\\r")
+		case '\t':
+			strings.write_string(&builder, "\\t")
+		case:
+			strings.write_byte(&builder, scalar.value[i])
+		}
+	}
+	strings.write_string(&builder, "\"")
+	return strings.to_string(builder)
+}
+
 // the dump says the same thing the emitter writes: the first time an anchored
 // node shows up it is printed under its anchor, and a node that is the very
 // same one a second time is printed as an alias
@@ -807,7 +850,7 @@ print_yaml_node_written :: proc(node: ^parser.YamlNode, depth: int, written: ^ma
         for _ in 0 ..< depth {
             fmt.print("  ")
         }
-        fmt.println(v.value)
+        fmt.println(format_dump_scalar(v))
     case parser.MappingNode:
         for pair in v.pairs {
             for _ in 0 ..< depth {
@@ -826,7 +869,7 @@ print_yaml_node_written :: proc(node: ^parser.YamlNode, depth: int, written: ^ma
                 fmt.print("  ")
             }
             if item.kind == .Scalar {
-                fmt.printf("- %s\n", item.value.(parser.ScalarNode).value)
+                fmt.printf("- %s\n", format_dump_scalar(item.value.(parser.ScalarNode)))
             } else {
                 fmt.println("-")
                 print_yaml_node_written(item, depth + 1, written)
