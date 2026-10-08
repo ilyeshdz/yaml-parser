@@ -8,7 +8,7 @@ And no, I initially thought it was a great idea to match what the specification 
 
 Also, reading the YAML spec was... an experience. Did you know YAML technically supports JSON as a subset? Yeah, I'm not gonna bother with that. Full spec compliance is completely out of scope, the spec is 70 pages of pure chaos and I will never use all of it anyway.
 
-The lexer handles identifiers, quoted strings, integers, floats, dates, indentation, the markers that open and close a document, bullets, colons, and anchors and aliases. The parser is a recursive descent parser that walks every document of a stream and handles flat and nested block mappings, block sequences, and typed scalar values (string, integer, float, timestamp) with proper error propagation. The emitter goes the other way and writes a parsed stream back out as YAML, which is what makes editing a value in a file possible.
+The lexer handles identifiers, quoted strings, integers, floats, dates, indentation, the markers that open and close a document, bullets, colons, and anchors and aliases. The parser is a recursive descent parser that walks every document of a stream and handles flat and nested block mappings, block sequences, and typed scalar values (string, integer, float, boolean, null, timestamp) with proper error propagation. The emitter goes the other way and writes a parsed stream back out as YAML, which is what makes editing a value in a file possible.
 
 I think that's pretty much it for the core of it. Sure, there are things I could add like flow sequences, but honestly this does what I need it to do. Might add more stuff later, might not. We'll see.
 
@@ -103,7 +103,7 @@ name: next-version
 
 A numeric path segment edits a list, so `set config.yaml sequence_key.1 item9` replaces the second item and `add config.yaml sequence_key.0 first` puts a new item in front of it. Adding at the length of the list appends to it, and adding to a key that is a list without an index appends as well, which is what the last example above does. Only items that are already in the list can be set, so an index past the end is an error.
 
-The catch is that the document gets written back out from the parsed tree, so comments, blank lines, quote style, and the exact spacing of the original are gone. That is the price of not keeping the source around, and `--dry-run` is there so you can see the result before it lands. The parser only reads lists of plain values for now, so a list of lists or a list of mappings cannot be written yet, even though the editing side is ready for it.
+The catch is that the document gets written back out from the parsed tree, so comments, blank lines, quote style, and the exact spacing of the original are gone. That is the price of not keeping the source around, and `--dry-run` is there so you can see the result before it lands. Sequences hold plain values as well as nested lists and mappings, so a list of lists or a list of mappings round-trips through the emitter.
 
 A key written twice in the same mapping is a parse error instead of a quiet pick between the two, because a lookup would otherwise hand back whichever one it happens to reach first:
 
