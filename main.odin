@@ -141,6 +141,7 @@ Usage:
   yaml-parser get <file> <key.path> -t print the type of that value instead
   yaml-parser set <file> <key.path> <value> replace the value at <key.path>
   yaml-parser add <file> <key.path> <value> add a new key at <key.path>
+  yaml-parser del <file> <key.path>    delete the value at <key.path>
   yaml-parser help                     print this message
 
 Key paths are dot separated, and a numeric segment indexes a sequence:
@@ -168,7 +169,9 @@ string instead, so 42 stays the string "42".
 A numeric path segment edits a list item, where set replaces the item and add
 puts the value in front of it, so adding at the length of the list appends to
 it. Adding to a key that is a list without an index appends to the list, and
-makes a new key when the key is not there yet.
+makes a new key when the key is not there yet. del drops the key or the list
+item the path points at and prints the removed value, and takes --doc and
+--dry-run like the other editing commands.
 
 Exit codes:
   0  the value was printed
@@ -429,6 +432,121 @@ sequence_append :: proc(sequence: parser.SequenceNode, value: ^parser.YamlNode) 
 	}
 	append(&items, value)
 	return wrap_sequence(items)
+}
+
+// node_delete returns a copy of the document with one key dropped. Like
+// node_edit it only rebuilds the spine from the root down to the change, and
+// hands back the removed node so the caller can print what went away.
+node_delete :: proc(node: ^parser.YamlNode, path: string) -> (edited: ^parser.YamlNode, removed: ^parser.YamlNode, err: Lookup_Error) {
+	if path == "" {
+		return nil, nil, Lookup_Error{kind = .Empty_Path}
+	}
+
+	sequence, is_sequence := node.value.(parser.SequenceNode)
+	if is_sequence {
+		return sequence_delete(sequence, path)
+	}
+
+	mapping, is_mapping := node.value.(parser.MappingNode)
+	if !is_mapping {
+		kind := Lookup_Error_Kind.Not_A_Collection
+		if node.kind == .Sequence {
+			kind = .Not_A_Mapping
+		}
+		return nil, nil, Lookup_Error{kind = kind, segment = path, node_kind = node.kind}
+	}
+
+	first_dot := strings.index_byte(path, '.')
+
+	// a path of one segment is the key to drop from this mapping
+	if first_dot < 0 {
+		index := parser.mapping_pair_index(mapping, path)
+		if index < 0 {
+			return nil, nil, Lookup_Error{kind = .Key_Not_Found, segment = path}
+		}
+		pairs: [dynamic]parser.MappingPair
+		for pair, position in mapping.pairs {
+			if position != index {
+				append(&pairs, pair)
+			}
+		}
+		return wrap_mapping(pairs), mapping.pairs[index].value, Lookup_Error{}
+	}
+
+	// a longer path drops the key from inside the value it starts with
+	head := path[:first_dot]
+	child_path := path[first_dot + 1:]
+	if head == "" || child_path == "" {
+		return nil, nil, Lookup_Error{kind = .Empty_Segment}
+	}
+
+	child_index := parser.mapping_pair_index(mapping, head)
+	if child_index < 0 {
+		return nil, nil, Lookup_Error{kind = .Key_Not_Found, segment = head}
+	}
+
+	child, dropped, child_err := node_delete(mapping.pairs[child_index].value, child_path)
+	if child_err.kind != .None {
+		return nil, nil, child_err
+	}
+
+	pairs: [dynamic]parser.MappingPair
+	for pair in mapping.pairs {
+		append(&pairs, pair)
+	}
+	pairs[child_index].value = child
+
+	return wrap_mapping(pairs), dropped, Lookup_Error{}
+}
+
+// sequence_delete drops one item of a sequence. The head of the path is the
+// index of the item to drop, or of the item to drop from the inside when the
+// path keeps going.
+sequence_delete :: proc(sequence: parser.SequenceNode, path: string) -> (edited: ^parser.YamlNode, removed: ^parser.YamlNode, err: Lookup_Error) {
+	first_dot := strings.index_byte(path, '.')
+
+	head := path
+	child_path := ""
+	if first_dot >= 0 {
+		head = path[:first_dot]
+		child_path = path[first_dot + 1:]
+		if head == "" || child_path == "" {
+			return nil, nil, Lookup_Error{kind = .Empty_Segment}
+		}
+	}
+
+	index, is_index := strconv.parse_int(head, 10)
+	if !is_index {
+		return nil, nil, Lookup_Error{kind = .Not_An_Index, segment = head}
+	}
+	if index < 0 || index >= len(sequence.items) {
+		return nil, nil, Lookup_Error{kind = .Index_Out_Of_Range, segment = head, index = index}
+	}
+
+	// the index itself is the item to drop
+	if child_path == "" {
+		items: [dynamic]^parser.YamlNode
+		for item, position in sequence.items {
+			if position != index {
+				append(&items, item)
+			}
+		}
+		return wrap_sequence(items), sequence.items[index], Lookup_Error{}
+	}
+
+	// the path keeps going, so the item is dropped from the inside
+	child, dropped, child_err := node_delete(sequence.items[index], child_path)
+	if child_err.kind != .None {
+		return nil, nil, child_err
+	}
+
+	items: [dynamic]^parser.YamlNode
+	for item in sequence.items {
+		append(&items, item)
+	}
+	items[index] = child
+
+	return wrap_sequence(items), dropped, Lookup_Error{}
 }
 
 wrap_sequence :: proc(items: [dynamic]^parser.YamlNode) -> ^parser.YamlNode {
@@ -745,6 +863,66 @@ run_edit :: proc(args: []string, mode: Edit_Mode, allocator := context.allocator
 	return EXIT_OK
 }
 
+// run_delete drops the value at a key path and prints what went away, writing
+// the whole stream back out the way set and add do
+run_delete :: proc(args: []string, allocator := context.allocator) -> int {
+	if len(args) < 2 {
+		return report_usage_error("del takes a file and a key path")
+	}
+
+	filename := args[0]
+	path := args[1]
+
+	flags, flag_message := parse_flags(args[2:], "del", Flag_Options{allow_dry_run = true})
+	if flag_message != "" {
+		return report_usage_error(flag_message)
+	}
+
+	source, read_err := os.read_entire_file(filename, context.allocator)
+	if read_err != nil {
+		fmt.eprintf("Failed to read file %s: %v\n", filename, read_err)
+		return EXIT_PARSE_ERROR
+	}
+
+	document, err := parse_source(string(source), allocator)
+	if err != nil {
+		print_load_error(err, filename)
+		return EXIT_PARSE_ERROR
+	}
+
+	root, lookup_err := pick_document(document, flags)
+	if lookup_err.kind != .None {
+		print_lookup_error(lookup_err, path)
+		return EXIT_LOOKUP_ERROR
+	}
+
+	edited, removed: ^parser.YamlNode
+	edited, removed, lookup_err = node_delete(root, path)
+	if lookup_err.kind != .None {
+		print_lookup_error(lookup_err, path)
+		return EXIT_LOOKUP_ERROR
+	}
+
+	// the whole stream goes back out, so the documents behind the one being
+	// edited are written back instead of being dropped
+	document.documents[flags.document] = edited
+	output := emitter.emit_stream(document.documents, emitter.detect_indent(string(source)), allocator)
+
+	if flags.dry_run {
+		fmt.print(output)
+		return EXIT_OK
+	}
+
+	write_err := os.write_entire_file_from_string(filename, output)
+	if write_err != nil {
+		fmt.eprintf("Failed to write file %s: %v\n", filename, write_err)
+		return EXIT_WRITE_ERROR
+	}
+
+	print_value(removed)
+	return EXIT_OK
+}
+
 edit_mode_name :: proc(mode: Edit_Mode) -> string {
 	switch mode {
 	case .Set:
@@ -784,6 +962,8 @@ run :: proc(args: []string) -> int {
 		return run_edit(args[2:], .Set, allocator)
 	case "add":
 		return run_edit(args[2:], .Add, allocator)
+	case "del":
+		return run_delete(args[2:], allocator)
 	}
 
 	return report_usage_error(fmt.tprintf("unknown command '%s'", args[1]))
