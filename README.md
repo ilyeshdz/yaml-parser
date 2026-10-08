@@ -43,7 +43,7 @@ If the key path points at a mapping or a sequence, the whole subtree is printed 
 
 ## More than one document in a file
 
-A file can hold a stream of documents, each one opened by a `---` of its own and closed either by the marker opening the next one or by a `...`:
+A file can hold a stream of documents, each one opened by a `---` of its own and closed either by the marker opening the next one or by a `...`. A file holding a single document can skip the marker and start with the mapping itself, and editing such a file writes the markers back out:
 
 ```yaml
 ---

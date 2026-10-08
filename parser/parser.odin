@@ -52,20 +52,22 @@ parser_parse :: proc(p: ^Parser, allocator := context.allocator) -> (document: Y
 			continue
 		}
 
-		// a file that does not open with a marker is not a stream this parser
-		// knows how to read
+		// a file can hold a single document without any marker, which is
+		// how plain files without a --- open
 		if p.current.kind != .StreamStart {
-			err = yaml_error.ParserError {
-				kind    = .UnexpectedToken,
-				message = fmt.tprintf("a document has to open with ---, got %s", p.current.kind),
-				line    = p.current.line,
-				col     = p.current.col,
+			if len(document.documents) > 0 || !is_implicit_document_start(p.current.kind) {
+				err = yaml_error.ParserError {
+					kind    = .UnexpectedToken,
+					message = fmt.tprintf("a document has to open with ---, got %s", p.current.kind),
+					line    = p.current.line,
+					col     = p.current.col,
+				}
+				return
 			}
-			return
+		} else {
+			err = parser_advance(p)
+			if err != nil { return }
 		}
-
-		err = parser_advance(p)
-		if err != nil { return }
 
 		clear(&p.anchors)
 
@@ -451,6 +453,17 @@ scalar_from_token :: proc(tok: lexer_package.Token) -> ScalarNode {
 is_scalar_kind :: proc(kind: lexer_package.Token_Kind) -> bool {
 	return kind == .Identifier || kind == .String || kind == .Integer ||
 	       kind == .Float || kind == .Timestamp
+}
+
+// is_implicit_document_start reports whether a token can open a document
+// without a --- marker, which is how a plain file holding a single mapping
+// begins
+is_implicit_document_start :: proc(kind: lexer_package.Token_Kind) -> bool {
+	#partial switch kind {
+	case .Identifier, .String, .Integer, .Float, .Timestamp, .Anchor, .Alias:
+		return true
+	}
+	return false
 }
 
 skip_newlines :: proc(p: ^Parser) -> (err: yaml_error.YamlError) {
